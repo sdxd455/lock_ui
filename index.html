@@ -70,7 +70,6 @@
 
             <div class="bar-bg"><div id="distBar" class="bar-fill"></div></div>
             
-            <!-- 停车信息 -->
             <div id="parkingArea" style="margin-top:15px; border-top:1px solid #eee; padding-top:10px; display:none;">
                 <div style="font-size:12px; font-weight:bold; color:#5856D6;">🅿️ 车辆位置已保存</div>
                 <div id="parkTime" style="font-size:10px; color:#999;">--:--</div>
@@ -79,11 +78,10 @@
 
             <div id="log">Waiting...</div>
         </div>
-        <button id="btnConnect" class="btn">连接设备</button>
+        <button id="btnConnect" class="btn">📡 连接 HC-08 (精准版)</button>
     </div>
 
     <script>
-        // 1. 地图初始化
         const map = L.map('map', { zoomControl: false }).setView([31.2304, 121.4737], 15);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '©OSM' }).addTo(map);
 
@@ -93,7 +91,6 @@
         
         let userMarker, lockMarker, parkMarker;
 
-        // 2. 存储逻辑
         window.onload = () => {
             if(navigator.geolocation) navigator.geolocation.watchPosition(updateUserPos, null, {enableHighAccuracy:true});
             const lat = localStorage.getItem('p_lat'), lon = localStorage.getItem('p_lon'), t = localStorage.getItem('p_time');
@@ -111,17 +108,12 @@
         function updateParking(lat, lon, time, center=true) {
             if(!parkMarker) parkMarker = L.marker([lat, lon], {icon: ParkIcon}).addTo(map).bindPopup("停车点");
             else parkMarker.setLatLng([lat, lon]);
-            
             localStorage.setItem('p_lat', lat); localStorage.setItem('p_lon', lon); localStorage.setItem('p_time', time);
             document.getElementById('parkingArea').style.display = 'block';
             document.getElementById('parkTime').innerText = "更新于 " + time;
             document.getElementById('parkCoords').innerText = lat.toFixed(5) + ", " + lon.toFixed(5);
             if(center) map.setView([lat, lon], 18);
         }
-
-        // 3. 蓝牙逻辑 (通用适配版)
-        const SERVICE_UUID_FFF0 = 0xFFF0; 
-        const SERVICE_UUID_FFE0 = 0xFFE0;
 
         function nmeaToDec(val) {
             if(!val) return null;
@@ -133,7 +125,6 @@
             const str = new TextDecoder().decode(event.target.value);
             document.getElementById('log').innerText = "RX: " + str;
             
-            // 解析数据
             const distM = str.match(/DIST:(\d+)/);
             const latM = str.match(/LAT:([\d\.]+)/);
             const lonM = str.match(/LON:([\d\.]+)/);
@@ -172,31 +163,29 @@
             }
         }
 
+        // ★★★ 核心修改：只锁定 FFF0，不再搜索所有 ★★★
+        const UUID_SERVICE = 0xFFF0;
+        
         document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
-                // 搜索所有设备，不限制UUID (最大兼容性)
+                if (!navigator.bluetooth) return alert("请使用 Chrome/Edge 或 Bluefy");
+
+                // 1. 请求设备 (精准过滤)
+                document.getElementById('status').innerText = "搜索中...";
                 const device = await navigator.bluetooth.requestDevice({
-                    acceptAllDevices: true,
-                    optionalServices: [SERVICE_UUID_FFF0, SERVICE_UUID_FFE0] // 声明可能用到的服务
+                    filters: [{ services: [UUID_SERVICE] }] 
                 });
 
-                document.getElementById('status').innerText = "连接中...";
+                document.getElementById('status').innerText = "连接 GATT...";
                 const server = await device.gatt.connect();
                 
-                // ★★★ 智能扫描逻辑 ★★★
-                // 自动寻找可用的服务和特征值，不再死板地认定 FFF1
-                let service, char;
-                
-                try {
-                    service = await server.getPrimaryService(SERVICE_UUID_FFF0);
-                } catch {
-                    try { service = await server.getPrimaryService(SERVICE_UUID_FFE0); } catch(e){}
-                }
+                document.getElementById('status').innerText = "获取服务...";
+                const service = await server.getPrimaryService(UUID_SERVICE);
 
-                if(!service) throw new Error("未找到 FFF0 或 FFE0 服务");
-
-                // 获取该服务下所有特征值，找到第一个支持 Notify 的
+                document.getElementById('status').innerText = "获取特征...";
+                // 自动遍历寻找支持 Notify 的特征值 (FFF1, FFF2 等)
                 const characteristics = await service.getCharacteristics();
+                let char = null;
                 for (const c of characteristics) {
                     if (c.properties.notify) {
                         char = c;
@@ -204,7 +193,7 @@
                     }
                 }
 
-                if(!char) throw new Error("未找到支持通知的特征值");
+                if(!char) throw new Error("未找到可读数据特征值 (Notify)");
 
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', handleData);
@@ -212,7 +201,7 @@
                 document.getElementById('status').innerText = "在线";
                 document.getElementById('status').classList.add('on');
                 document.getElementById('btnConnect').style.display = "none";
-                document.getElementById('log').innerText = `已连接: ${service.uuid} -> ${char.uuid}`;
+                document.getElementById('log').innerText = `已连接: ${device.name}`;
 
                 device.addEventListener('gattserverdisconnected', () => {
                     document.getElementById('status').innerText = "已断开";
@@ -222,7 +211,12 @@
                 });
 
             } catch (e) {
-                alert("连接失败: " + e.message);
+                console.error(e);
+                // ★★★ 详细报错提示 ★★★
+                let msg = e.message;
+                if (msg.includes("cancelled")) msg = "用户取消或配对超时";
+                if (msg.includes("No device selected")) msg = "未选择设备";
+                alert("连接失败:\n" + msg + "\n\n建议：\n1. 请在系统蓝牙设置中[忽略此设备]后再试。\n2. 确保模块未被其他 APP 占用。");
                 document.getElementById('status').innerText = "失败";
             }
         });
