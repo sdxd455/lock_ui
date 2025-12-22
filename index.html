@@ -115,7 +115,7 @@
             <div id="debugInfo">等待连接...</div>
         </div>
 
-        <button id="btnConnect" class="btn">📡 搜索并连接 (Search All)</button>
+        <button id="btnConnect" class="btn">📡 连接设备 (UUID: FFF0)</button>
     </div>
 
     <script>
@@ -158,10 +158,10 @@
             }
         }
 
-        // --- 3. 蓝牙逻辑 (HC-08 兼容版) ---
-        // HC-08 默认服务通常是 FFE0，特征值 FFE1
-        const SERVICE_UUID = 0xFFE0;
-        const CHAR_UUID = 0xFFE1;
+        // --- 3. 蓝牙逻辑 (适配你的 HC-08) ---
+        // ★★★ 核心修改：根据你的截图，UUID 是 FFF0 ★★★
+        const SERVICE_UUID = 0xFFF0;
+        const CHAR_UUID = 0xFFF1; // FFF0 服务下通常搭配 FFF1 特征值
 
         function nmeaToDec(valStr) {
             if (!valStr) return null;
@@ -233,23 +233,30 @@
         document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
                 if (!navigator.bluetooth) {
-                    alert('请使用 Chrome/Edge 浏览器');
+                    alert('请使用 Chrome/Edge 浏览器，iOS 请使用 Bluefy');
                     return;
                 }
 
-                // ★★★ 关键修改：acceptAllDevices: true ★★★
-                // 这会列出附近所有的蓝牙设备，不论它广播什么UUID
-                // 这样能保证你一定能看到 HC-08
+                // ★★★ 修改点：使用你截图里的 UUID ★★★
                 const device = await navigator.bluetooth.requestDevice({
-                    acceptAllDevices: true,
-                    optionalServices: [SERVICE_UUID] // 必须声明我们要用的服务
+                    filters: [{ services: [SERVICE_UUID] }] // 只搜索 FFF0 设备
+                    // 如果还搜不到，可以尝试改成 optionalServices + acceptAllDevices: true
                 });
 
                 document.getElementById('status').innerText = "连接中...";
                 
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService(SERVICE_UUID);
-                const char = await service.getCharacteristic(CHAR_UUID);
+                
+                // 尝试获取 FFF1 特征值
+                let char;
+                try {
+                    char = await service.getCharacteristic(CHAR_UUID);
+                } catch(e) {
+                    // 如果 FFF1 不行，尝试 FFF2 (备选方案)
+                    console.log("FFF1 not found, trying FFF2...");
+                    char = await service.getCharacteristic(0xFFF2);
+                }
                 
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', handleData);
@@ -267,7 +274,7 @@
 
             } catch (e) {
                 console.error(e);
-                alert("连接失败: " + e.message + "\n(请确保 HC-08 未被其他设备连接)");
+                alert("连接失败: " + e.message + "\n(请检查 UUID 是否匹配或设备已被占用)");
                 document.getElementById('status').innerText = "失败";
             }
         });
