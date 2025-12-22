@@ -7,56 +7,36 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { --primary: #007AFF; --success: #34C759; --danger: #FF3B30; --bg: rgba(255,255,255,0.9); }
+        :root { --primary: #007AFF; --success: #34C759; --danger: #FF3B30; --bg: rgba(255,255,255,0.95); }
         body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #000; height: 100vh; overflow: hidden; }
         #map { height: 100%; width: 100%; }
-        
-        .panel {
-            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            width: 90%; max-width: 400px; z-index: 1000;
-            display: flex; flex-direction: column; gap: 10px;
-        }
-        .card {
-            background: var(--bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-            border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
+        .panel { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
+        .card { background: var(--bg); backdrop-filter: blur(20px); border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
         .title { font-size: 20px; font-weight: 700; color: #000; }
         .badge { font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; background: #eee; color: #888; }
         .badge.on { background: var(--success); color: #fff; }
-        
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .info-box { background: rgba(255,255,255,0.5); padding: 10px; border-radius: 12px; text-align: center; }
         .label { font-size: 11px; color: #888; text-transform: uppercase; }
         .val { font-size: 18px; font-weight: 700; color: #000; }
-        
         .bar-bg { height: 6px; background: #eee; border-radius: 3px; margin-top: 15px; overflow: hidden; }
         .bar-fill { height: 100%; width: 0%; background: var(--primary); transition: width 0.3s, background 0.3s; }
-        
-        .btn {
-            width: 100%; padding: 16px; background: var(--primary); color: white; border: none; border-radius: 18px;
-            font-size: 16px; font-weight: 600; cursor: pointer; box-shadow: 0 5px 15px rgba(0,122,255,0.3);
-        }
-        
-        #log { font-size: 10px; color: #aaa; text-align: center; margin-top: 8px; height: 14px; overflow: hidden; }
-        
-        /* Icons */
+        .btn { width: 100%; padding: 16px; background: var(--primary); color: white; border: none; border-radius: 18px; font-size: 16px; font-weight: 600; cursor: pointer; }
+        #log { font-size: 10px; color: #aaa; text-align: center; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .user-dot { width: 18px; height: 18px; background: #007AFF; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 10px rgba(0,122,255,0.2); animation: pulse 2s infinite; }
         .lock-dot { width: 30px; height: 30px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
-        .park-dot { width: 30px; height: 30px; background: #5856D6; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; border: 2px solid #fff; }
-        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,122,255,0.4); } 70% { box-shadow: 0 0 0 15px rgba(0,122,255,0); } 100% { box-shadow: 0 0 0 0 rgba(0,122,255,0); } }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,122,255,0.4); } 70% { box-shadow: 0 0 0 15px rgba(0,122,255,0); } }
     </style>
 </head>
 <body>
     <div id="map"></div>
-    
     <div class="panel">
         <div class="card">
             <div class="header">
                 <div class="title">My Lock</div>
                 <div id="status" class="badge">未连接</div>
             </div>
-            
             <div class="info-grid">
                 <div class="info-box">
                     <div class="label">距离</div>
@@ -67,62 +47,33 @@
                     <div id="lockStatus" class="val">🔒</div>
                 </div>
             </div>
-
             <div class="bar-bg"><div id="distBar" class="bar-fill"></div></div>
-            
-            <div id="parkingArea" style="margin-top:15px; border-top:1px solid #eee; padding-top:10px; display:none;">
-                <div style="font-size:12px; font-weight:bold; color:#5856D6;">🅿️ 车辆位置已保存</div>
-                <div id="parkTime" style="font-size:10px; color:#999;">--:--</div>
-                <div id="parkCoords" style="font-size:10px; font-family:monospace; color:#666;"></div>
-            </div>
-
             <div id="log">Waiting...</div>
         </div>
-        <button id="btnConnect" class="btn">📡 连接 HC-08 (精准版)</button>
+        <button id="btnConnect" class="btn">📡 连接 HC-08 (自动拼接)</button>
     </div>
 
     <script>
         const map = L.map('map', { zoomControl: false }).setView([31.2304, 121.4737], 15);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '©OSM' }).addTo(map);
-
+        
         const UserIcon = L.divIcon({ className: 'c', html: '<div class="user-dot"></div>', iconSize: [24,24] });
         const LockIcon = L.divIcon({ className: 'c', html: '<div class="lock-dot">🔴</div>', iconSize: [30,30] });
-        const ParkIcon = L.divIcon({ className: 'c', html: '<div class="park-dot">P</div>', iconSize: [34,34] });
         
-        let userMarker, lockMarker, parkMarker;
+        let userMarker, lockMarker;
+        
+        // ★★★ 核心修改 1：数据缓存区 ★★★
+        let dataBuffer = "";
 
-        window.onload = () => {
-            if(navigator.geolocation) navigator.geolocation.watchPosition(updateUserPos, null, {enableHighAccuracy:true});
-            const lat = localStorage.getItem('p_lat'), lon = localStorage.getItem('p_lon'), t = localStorage.getItem('p_time');
-            if(lat && lon) updateParking(parseFloat(lat), parseFloat(lon), t, false);
-        };
-
-        function updateUserPos(pos) {
-            const ll = [pos.coords.latitude, pos.coords.longitude];
-            if(!userMarker) {
-                userMarker = L.marker(ll, {icon: UserIcon}).addTo(map);
-                if(!parkMarker) map.setView(ll, 17);
-            } else userMarker.setLatLng(ll);
-        }
-
-        function updateParking(lat, lon, time, center=true) {
-            if(!parkMarker) parkMarker = L.marker([lat, lon], {icon: ParkIcon}).addTo(map).bindPopup("停车点");
-            else parkMarker.setLatLng([lat, lon]);
-            localStorage.setItem('p_lat', lat); localStorage.setItem('p_lon', lon); localStorage.setItem('p_time', time);
-            document.getElementById('parkingArea').style.display = 'block';
-            document.getElementById('parkTime').innerText = "更新于 " + time;
-            document.getElementById('parkCoords').innerText = lat.toFixed(5) + ", " + lon.toFixed(5);
-            if(center) map.setView([lat, lon], 18);
-        }
-
+        // NMEA转十进制
         function nmeaToDec(val) {
             if(!val) return null;
             let v = parseFloat(val); if(isNaN(v)) return null;
             return Math.floor(v/100) + (v%100)/60;
         }
 
-        function handleData(event) {
-            const str = new TextDecoder().decode(event.target.value);
+        function processLine(str) {
+            // 解析完整的一行数据
             document.getElementById('log').innerText = "RX: " + str;
             
             const distM = str.match(/DIST:(\d+)/);
@@ -139,9 +90,8 @@
                 bar.style.background = d<1500 ? "#34C759" : (d>3000 ? "#FF3B30" : "#007AFF");
             }
 
-            let isLocked = true;
             if(lockM) {
-                isLocked = (lockM[1] === "LOCKED");
+                const isLocked = (lockM[1] === "LOCKED");
                 const div = document.getElementById('lockStatus');
                 div.innerText = isLocked ? "🔒" : "🔓";
                 div.style.color = isLocked ? "#000" : "#34C759";
@@ -153,47 +103,61 @@
                 if(lat && lon) {
                     if(!lockMarker) lockMarker = L.marker([lat, lon], {icon: LockIcon}).addTo(map);
                     else lockMarker.setLatLng([lat, lon]);
-
-                    if(isLocked && lockM) {
-                        const now = new Date();
-                        const t = `${now.getHours()}:${(now.getMinutes()<10?'0':'')+now.getMinutes()}`;
-                        updateParking(lat, lon, t, false);
-                    }
+                    
+                    // 自动跟随最新坐标
+                    // map.setView([lat, lon], 18); 
                 }
             }
         }
 
-        // ★★★ 核心修改：只锁定 FFF0，不再搜索所有 ★★★
-        const UUID_SERVICE = 0xFFF0;
-        
+        // ★★★ 核心修改 2：数据拼接逻辑 ★★★
+        function handleData(event) {
+            const str = new TextDecoder().decode(event.target.value);
+            dataBuffer += str; // 把新收到的碎片拼接到缓存后面
+
+            // 检查是否有换行符 (说明一条数据结束了)
+            let newlineIdx = dataBuffer.indexOf('\n');
+            
+            while (newlineIdx !== -1) {
+                // 提取完整的一行
+                const line = dataBuffer.substring(0, newlineIdx).trim();
+                if (line.length > 0) {
+                    processLine(line); // 处理这一行
+                }
+                
+                // 把处理完的这行删掉，保留剩下的碎片
+                dataBuffer = dataBuffer.substring(newlineIdx + 1);
+                
+                // 继续找下一个换行符
+                newlineIdx = dataBuffer.indexOf('\n');
+            }
+        }
+
+        const UUID_FFF0 = 0xFFF0;
+        const UUID_FFE0 = 0xFFE0;
+
         document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
-                if (!navigator.bluetooth) return alert("请使用 Chrome/Edge 或 Bluefy");
-
-                // 1. 请求设备 (精准过滤)
-                document.getElementById('status').innerText = "搜索中...";
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [UUID_SERVICE] }] 
+                    acceptAllDevices: true,
+                    optionalServices: [UUID_FFF0, UUID_FFE0]
                 });
 
-                document.getElementById('status').innerText = "连接 GATT...";
+                document.getElementById('status').innerText = "连接中...";
                 const server = await device.gatt.connect();
                 
-                document.getElementById('status').innerText = "获取服务...";
-                const service = await server.getPrimaryService(UUID_SERVICE);
+                let service, char;
+                try { service = await server.getPrimaryService(UUID_FFF0); } 
+                catch { try { service = await server.getPrimaryService(UUID_FFE0); } catch(e){} }
 
-                document.getElementById('status').innerText = "获取特征...";
-                // 自动遍历寻找支持 Notify 的特征值 (FFF1, FFF2 等)
+                if(!service) throw new Error("未找到服务");
+
                 const characteristics = await service.getCharacteristics();
-                let char = null;
                 for (const c of characteristics) {
-                    if (c.properties.notify) {
-                        char = c;
-                        break;
-                    }
+                    if (c.properties.notify) { char = c; break; }
                 }
 
-                if(!char) throw new Error("未找到可读数据特征值 (Notify)");
+                if(!char) throw new Error("未找到特征值");
 
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', handleData);
@@ -201,7 +165,7 @@
                 document.getElementById('status').innerText = "在线";
                 document.getElementById('status').classList.add('on');
                 document.getElementById('btnConnect').style.display = "none";
-                document.getElementById('log').innerText = `已连接: ${device.name}`;
+                document.getElementById('log').innerText = "连接成功！";
 
                 device.addEventListener('gattserverdisconnected', () => {
                     document.getElementById('status').innerText = "已断开";
@@ -211,12 +175,7 @@
                 });
 
             } catch (e) {
-                console.error(e);
-                // ★★★ 详细报错提示 ★★★
-                let msg = e.message;
-                if (msg.includes("cancelled")) msg = "用户取消或配对超时";
-                if (msg.includes("No device selected")) msg = "未选择设备";
-                alert("连接失败:\n" + msg + "\n\n建议：\n1. 请在系统蓝牙设置中[忽略此设备]后再试。\n2. 确保模块未被其他 APP 占用。");
+                alert("失败: " + e.message);
                 document.getElementById('status').innerText = "失败";
             }
         });
