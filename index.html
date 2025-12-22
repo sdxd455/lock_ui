@@ -230,33 +230,29 @@
             }
         }
 
-        document.getElementById('btnConnect').addEventListener('click', async () => {
+       document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
                 if (!navigator.bluetooth) {
-                    alert('请使用 Chrome/Edge 浏览器，iOS 请使用 Bluefy');
+                    alert('请使用 Chrome/Edge 浏览器');
                     return;
                 }
 
-                // ★★★ 修改点：使用你截图里的 UUID ★★★
+                // ★★★ 核心修改：改回 filters 模式，指定 UUID ★★★
+                // 这样可以告诉 Windows 我们只需要这个服务，不需要完整配对
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [SERVICE_UUID] }] // 只搜索 FFF0 设备
-                    // 如果还搜不到，可以尝试改成 optionalServices + acceptAllDevices: true
+                    filters: [{ 
+                        services: [0xFFF0] // 必须是整数格式或字符串格式 "0000fff0-0000-1000-8000-00805f9b34fb"
+                    }],
+                    optionalServices: [0xFFF0] // 再次申明
                 });
 
                 document.getElementById('status').innerText = "连接中...";
                 
                 const server = await device.gatt.connect();
-                const service = await server.getPrimaryService(SERVICE_UUID);
+                const service = await server.getPrimaryService(0xFFF0); // 注意这里也要改
                 
-                // 尝试获取 FFF1 特征值
-                let char;
-                try {
-                    char = await service.getCharacteristic(CHAR_UUID);
-                } catch(e) {
-                    // 如果 FFF1 不行，尝试 FFF2 (备选方案)
-                    console.log("FFF1 not found, trying FFF2...");
-                    char = await service.getCharacteristic(0xFFF2);
-                }
+                // 尝试获取特征值 (FFF1)
+                const char = await service.getCharacteristic(0xFFF1);
                 
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', handleData);
@@ -269,12 +265,13 @@
                     document.getElementById('status').innerText = "已断开";
                     document.getElementById('status').classList.remove('on');
                     document.getElementById('btnConnect').style.display = "block";
-                    alert("蓝牙已断开 (停车位置已保存)");
+                    alert("蓝牙已断开");
                 });
 
             } catch (e) {
                 console.error(e);
-                alert("连接失败: " + e.message + "\n(请检查 UUID 是否匹配或设备已被占用)");
+                // 这里的提示会更具体
+                alert("连接失败: " + e.message + "\n建议：请重启电脑蓝牙开关再试！");
                 document.getElementById('status').innerText = "失败";
             }
         });
