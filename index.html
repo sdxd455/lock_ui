@@ -4,316 +4,169 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Find My Lock</title>
-    
-    <!-- Leaflet 地图核心 -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
     <style>
-        /* --- iOS 设计语言 --- */
-        :root {
-            --ios-bg: rgba(255, 255, 255, 0.85);
-            --ios-blur: saturate(180%) blur(20px);
-            --ios-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-            --primary: #007AFF;
-            --success: #34C759;
-            --danger: #FF3B30;
-            --text-main: #1c1c1e;
-            --text-sub: #8e8e93;
-            --radius: 22px;
-        }
-
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; background: #000; overflow: hidden; height: 100vh; width: 100vw; }
+        :root { --primary: #007AFF; --success: #34C759; --danger: #FF3B30; --bg: rgba(255,255,255,0.9); }
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #000; height: 100vh; overflow: hidden; }
+        #map { height: 100%; width: 100%; }
         
-        /* 全屏地图 */
-        #map { height: 100%; width: 100%; z-index: 0; background: #f2f2f7; }
-
-        /* 顶部安全区适配 */
-        .safe-area-top { position: absolute; top: 0; left: 0; right: 0; height: env(safe-area-inset-top); background: linear-gradient(to bottom, rgba(255,255,255,0.8), transparent); z-index: 999; pointer-events: none; }
-
-        /* 底部控制面板 */
         .panel {
             position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
             width: 90%; max-width: 400px; z-index: 1000;
-            display: flex; flex-direction: column; gap: 12px;
-            pointer-events: none; /* 让点击穿透到地图，只有卡片可点 */
+            display: flex; flex-direction: column; gap: 10px;
         }
-
         .card {
-            pointer-events: auto;
-            background: var(--ios-bg);
-            backdrop-filter: var(--ios-blur); -webkit-backdrop-filter: var(--ios-blur);
-            border-radius: var(--radius);
-            box-shadow: var(--ios-shadow);
-            padding: 24px;
-            border: 1px solid rgba(255,255,255,0.5);
-            animation: slideUp 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+            background: var(--bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
-
-        @keyframes slideUp { from { transform: translateY(100px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
-        /* 标题栏 */
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .title { font-size: 22px; font-weight: 700; color: var(--text-main); letter-spacing: -0.5px; }
-        .status-badge { font-size: 11px; font-weight: 600; padding: 6px 12px; border-radius: 20px; background: #E5E5EA; color: var(--text-sub); transition: 0.3s; text-transform: uppercase; }
-        .status-badge.on { background: var(--success); color: #fff; box-shadow: 0 2px 8px rgba(52, 199, 89, 0.4); }
-
-        /* 数据展示 */
-        .info-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .info-label { font-size: 13px; color: var(--text-sub); font-weight: 500; }
-        .info-val { font-size: 24px; font-weight: 700; color: var(--text-main); font-variant-numeric: tabular-nums; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .title { font-size: 20px; font-weight: 700; color: #000; }
+        .badge { font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; background: #eee; color: #888; }
+        .badge.on { background: var(--success); color: #fff; }
         
-        .lock-status { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; color: var(--text-main); background: rgba(255,255,255,0.5); padding: 8px 16px; border-radius: 12px; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .info-box { background: rgba(255,255,255,0.5); padding: 10px; border-radius: 12px; text-align: center; }
+        .label { font-size: 11px; color: #888; text-transform: uppercase; }
+        .val { font-size: 18px; font-weight: 700; color: #000; }
         
-        /* 进度条 */
-        .progress-bg { height: 8px; background: #E5E5EA; border-radius: 4px; overflow: hidden; position: relative; }
-        .progress-fill { height: 100%; width: 0%; background: var(--primary); border-radius: 4px; transition: width 0.5s cubic-bezier(0.19, 1, 0.22, 1), background 0.3s; }
-        .progress-labels { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10px; color: #aaa; font-weight: 500; }
-
-        /* 按钮 */
+        .bar-bg { height: 6px; background: #eee; border-radius: 3px; margin-top: 15px; overflow: hidden; }
+        .bar-fill { height: 100%; width: 0%; background: var(--primary); transition: width 0.3s, background 0.3s; }
+        
         .btn {
-            pointer-events: auto;
-            width: 100%; padding: 16px; border: none; border-radius: 18px;
-            background: var(--primary); color: #fff; font-size: 17px; font-weight: 600;
-            cursor: pointer; box-shadow: 0 8px 20px rgba(0,122,255,0.25);
-            transition: transform 0.1s, background 0.2s;
+            width: 100%; padding: 16px; background: var(--primary); color: white; border: none; border-radius: 18px;
+            font-size: 16px; font-weight: 600; cursor: pointer; box-shadow: 0 5px 15px rgba(0,122,255,0.3);
         }
-        .btn:active { transform: scale(0.96); background: #0062cc; }
-
-        /* 定位按钮 */
-        .fab-loc {
-            position: absolute; top: 20px; right: 20px; z-index: 999;
-            width: 48px; height: 48px; border-radius: 14px;
-            background: var(--ios-bg); backdrop-filter: var(--ios-blur);
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer;
-            border: 1px solid rgba(255,255,255,0.5);
-        }
-        .fab-loc svg { width: 22px; height: 22px; fill: var(--primary); }
-
-        /* 调试日志 */
-        #log { font-size: 10px; color: #ccc; text-align: center; margin-top: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 0.3s; }
-        .card:hover #log { opacity: 1; }
-
-        /* 地图自定义图标 */
-        .me-dot { width: 16px; height: 16px; background: #007AFF; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 10px rgba(0,122,255,0.15); animation: breath 3s infinite; }
-        .lock-dot { width: 32px; height: 32px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); border: 2px solid #fff; }
-        .park-dot { width: 36px; height: 36px; background: #5856D6; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight:bold; color:white; box-shadow: 0 4px 10px rgba(88, 86, 214, 0.3); border: 2px solid #fff; }
         
-        @keyframes breath { 0%, 100% { box-shadow: 0 0 0 8px rgba(0,122,255,0.15); } 50% { box-shadow: 0 0 0 15px rgba(0,122,255,0.05); } }
+        #log { font-size: 10px; color: #aaa; text-align: center; margin-top: 8px; height: 14px; overflow: hidden; }
+        
+        /* Icons */
+        .user-dot { width: 18px; height: 18px; background: #007AFF; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 10px rgba(0,122,255,0.2); animation: pulse 2s infinite; }
+        .lock-dot { width: 30px; height: 30px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+        .park-dot { width: 30px; height: 30px; background: #5856D6; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; border: 2px solid #fff; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,122,255,0.4); } 70% { box-shadow: 0 0 0 15px rgba(0,122,255,0); } 100% { box-shadow: 0 0 0 0 rgba(0,122,255,0); } }
     </style>
 </head>
 <body>
-    <div class="safe-area-top"></div>
-    
     <div id="map"></div>
-
-    <!-- 定位我的位置按钮 -->
-    <div class="fab-loc" onclick="centerToUser()">
-        <svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
-    </div>
-
+    
     <div class="panel">
         <div class="card">
             <div class="header">
                 <div class="title">My Lock</div>
-                <div id="status" class="status-badge">未连接</div>
-            </div>
-
-            <!-- 数据展示区 -->
-            <div class="info-row">
-                <div>
-                    <div class="info-label">UWB 距离</div>
-                    <div id="distVal" class="info-val">-- <span style="font-size:14px;color:#8E8E93">mm</span></div>
-                </div>
-                <div class="lock-status">
-                    <span id="lockIcon">🔒</span> <span id="lockText">未知状态</span>
-                </div>
-            </div>
-
-            <!-- 进度条 -->
-            <div class="progress-bg">
-                <div id="distBar" class="progress-fill"></div>
-            </div>
-            <div class="progress-labels">
-                <span>0m</span><span>1.5m (自动开锁)</span><span>3.0m</span>
+                <div id="status" class="badge">未连接</div>
             </div>
             
-            <!-- 停车信息 -->
-            <div id="parkingInfo" style="margin-top:15px; padding-top:15px; border-top:1px solid rgba(0,0,0,0.05); display:none;">
-                <div style="display:flex; justify-content:space-between; font-size:12px;">
-                    <span style="color:var(--text-main); font-weight:600;">🅿️ 车辆位置已保存</span>
-                    <span id="parkTime" style="color:var(--text-sub);">--:--</span>
+            <div class="info-grid">
+                <div class="info-box">
+                    <div class="label">距离</div>
+                    <div id="distVal" class="val">--</div>
                 </div>
-                <div id="parkCoords" style="font-size:11px; color:var(--text-sub); margin-top:4px; font-family:monospace;">--</div>
+                <div class="info-box">
+                    <div class="label">状态</div>
+                    <div id="lockStatus" class="val">🔒</div>
+                </div>
             </div>
 
-            <div id="log">Waiting for connection...</div>
-        </div>
+            <div class="bar-bg"><div id="distBar" class="bar-fill"></div></div>
+            
+            <!-- 停车信息 -->
+            <div id="parkingArea" style="margin-top:15px; border-top:1px solid #eee; padding-top:10px; display:none;">
+                <div style="font-size:12px; font-weight:bold; color:#5856D6;">🅿️ 车辆位置已保存</div>
+                <div id="parkTime" style="font-size:10px; color:#999;">--:--</div>
+                <div id="parkCoords" style="font-size:10px; font-family:monospace; color:#666;"></div>
+            </div>
 
-        <button id="btnConnect" class="btn">📡 连接设备 (UUID: FFF0)</button>
+            <div id="log">Waiting...</div>
+        </div>
+        <button id="btnConnect" class="btn">连接设备</button>
     </div>
 
     <script>
-        // --- 1. 检查 HTTPS ---
-        if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-            alert("⚠️ 警告：为了获取GPS位置，请将此网页发布到 HTTPS 环境 (如 GitHub Pages)，否则地图定位功能将无法使用！");
-        }
-
-        // --- 2. 地图系统 ---
-        // 使用 CartoDB Positron 风格，干净简洁，类似 Apple Maps
+        // 1. 地图初始化
         const map = L.map('map', { zoomControl: false }).setView([31.2304, 121.4737], 15);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '©OpenStreetMap, ©CartoDB',
-            maxZoom: 20
-        }).addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '©OSM' }).addTo(map);
 
-        // 图标定义
-        const MeIcon = L.divIcon({ className: 'custom-icon', html: '<div class="me-dot"></div>', iconSize: [20, 20], iconAnchor: [10, 10] });
-        const LockIcon = L.divIcon({ className: 'custom-icon', html: '<div class="lock-dot">🚲</div>', iconSize: [32, 32], iconAnchor: [16, 32] });
-        const ParkIcon = L.divIcon({ className: 'custom-icon', html: '<div class="park-dot">P</div>', iconSize: [36, 36], iconAnchor: [18, 36] });
+        const UserIcon = L.divIcon({ className: 'c', html: '<div class="user-dot"></div>', iconSize: [24,24] });
+        const LockIcon = L.divIcon({ className: 'c', html: '<div class="lock-dot">🔴</div>', iconSize: [30,30] });
+        const ParkIcon = L.divIcon({ className: 'c', html: '<div class="park-dot">P</div>', iconSize: [34,34] });
+        
+        let userMarker, lockMarker, parkMarker;
 
-        let userMarker, lockMarker, parkingMarker;
-        let lockGroup = L.featureGroup(); // 用于自动缩放
-
-        // --- 3. 用户定位 (手机GPS) ---
-        function startUserLocation() {
-            if (!("geolocation" in navigator)) {
-                document.getElementById('log').innerText = "❌ 浏览器不支持定位";
-                return;
-            }
-            
-            navigator.geolocation.watchPosition(
-                (pos) => {
-                    const lat = pos.coords.latitude;
-                    const lng = pos.coords.longitude;
-                    const acc = pos.coords.accuracy;
-                    
-                    if (!userMarker) {
-                        userMarker = L.marker([lat, lng], {icon: MeIcon}).addTo(map)
-                            .bindPopup(`我在这里 (精度${Math.round(acc)}米)`);
-                        // 首次定位，如果没车，就看人
-                        if(!localStorage.getItem('park_lat')) map.setView([lat, lng], 17);
-                    } else {
-                        userMarker.setLatLng([lat, lng]);
-                    }
-                },
-                (err) => {
-                    console.warn("定位失败", err);
-                    document.getElementById('log').innerText = "❌ 定位权限被拒绝或信号弱";
-                },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-            );
-        }
-
-        // 点击按钮回到人
-        function centerToUser() {
-            if(userMarker) map.setView(userMarker.getLatLng(), 18);
-            else alert("正在获取您的位置，请确保 GPS 已开启...");
-        }
-
-        // --- 4. 停车记忆系统 ---
-        function updateParking(lat, lon, timeStr, autoCenter=true) {
-            if(!parkingMarker) {
-                parkingMarker = L.marker([lat, lon], {icon: ParkIcon}).addTo(map).bindPopup("车辆最后位置");
-            } else {
-                parkingMarker.setLatLng([lat, lon]);
-            }
-            
-            // 存入缓存
-            localStorage.setItem('park_lat', lat);
-            localStorage.setItem('park_lon', lon);
-            localStorage.setItem('park_time', timeStr);
-
-            // 更新 UI
-            document.getElementById('parkingInfo').style.display = 'block';
-            document.getElementById('parkTime').innerText = timeStr;
-            document.getElementById('parkCoords').innerText = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-            
-            if(autoCenter) map.setView([lat, lon], 18);
-        }
-
-        // 加载历史记录
-        window.onload = function() {
-            startUserLocation();
-            const lat = localStorage.getItem('park_lat');
-            const lon = localStorage.getItem('park_lon');
-            const time = localStorage.getItem('park_time');
-            if(lat && lon) updateParking(parseFloat(lat), parseFloat(lon), time, false);
+        // 2. 存储逻辑
+        window.onload = () => {
+            if(navigator.geolocation) navigator.geolocation.watchPosition(updateUserPos, null, {enableHighAccuracy:true});
+            const lat = localStorage.getItem('p_lat'), lon = localStorage.getItem('p_lon'), t = localStorage.getItem('p_time');
+            if(lat && lon) updateParking(parseFloat(lat), parseFloat(lon), t, false);
         };
 
-        // --- 5. 蓝牙核心 (FFF0) ---
-        const SERVICE_UUID = 0xFFF0;
-        const CHAR_UUID = 0xFFF1;
+        function updateUserPos(pos) {
+            const ll = [pos.coords.latitude, pos.coords.longitude];
+            if(!userMarker) {
+                userMarker = L.marker(ll, {icon: UserIcon}).addTo(map);
+                if(!parkMarker) map.setView(ll, 17);
+            } else userMarker.setLatLng(ll);
+        }
 
-        // NMEA (ddmm.mmmm) -> Decimal (dd.dddd)
-        function nmeaToDec(valStr) {
-            if (!valStr) return null;
-            let val = parseFloat(valStr);
-            if (isNaN(val)) return null;
-            let deg = Math.floor(val / 100);
-            let min = val % 100;
-            return deg + (min / 60);
+        function updateParking(lat, lon, time, center=true) {
+            if(!parkMarker) parkMarker = L.marker([lat, lon], {icon: ParkIcon}).addTo(map).bindPopup("停车点");
+            else parkMarker.setLatLng([lat, lon]);
+            
+            localStorage.setItem('p_lat', lat); localStorage.setItem('p_lon', lon); localStorage.setItem('p_time', time);
+            document.getElementById('parkingArea').style.display = 'block';
+            document.getElementById('parkTime').innerText = "更新于 " + time;
+            document.getElementById('parkCoords').innerText = lat.toFixed(5) + ", " + lon.toFixed(5);
+            if(center) map.setView([lat, lon], 18);
+        }
+
+        // 3. 蓝牙逻辑 (通用适配版)
+        const SERVICE_UUID_FFF0 = 0xFFF0; 
+        const SERVICE_UUID_FFE0 = 0xFFE0;
+
+        function nmeaToDec(val) {
+            if(!val) return null;
+            let v = parseFloat(val); if(isNaN(v)) return null;
+            return Math.floor(v/100) + (v%100)/60;
         }
 
         function handleData(event) {
             const str = new TextDecoder().decode(event.target.value);
-            document.getElementById('log').innerText = str.trim();
-
+            document.getElementById('log').innerText = "RX: " + str;
+            
+            // 解析数据
             const distM = str.match(/DIST:(\d+)/);
             const latM = str.match(/LAT:([\d\.]+)/);
             const lonM = str.match(/LON:([\d\.]+)/);
             const lockM = str.match(/\| (LOCKED|OPEN)/);
 
-            // 更新 UI: 距离
-            if (distM) {
+            if(distM) {
                 let d = parseInt(distM[1]);
-                document.getElementById('distVal').innerText = d;
-                
-                let pct = (d/3000)*100; if(pct>100) pct=100;
+                document.getElementById('distVal').innerText = d + " mm";
+                let w = (d/3000)*100; if(w>100) w=100;
                 const bar = document.getElementById('distBar');
-                bar.style.width = pct + "%";
-                // 变色逻辑: <1.2m 绿色(开锁), >3m 红色(远), 中间蓝色
-                if(d < 1200) bar.style.background = "#34C759";
-                else if(d > 3000) bar.style.background = "#FF3B30";
-                else bar.style.background = "#007AFF";
+                bar.style.width = w + "%";
+                bar.style.background = d<1500 ? "#34C759" : (d>3000 ? "#FF3B30" : "#007AFF");
             }
 
-            // 更新 UI: 锁状态
             let isLocked = true;
-            if (lockM) {
+            if(lockM) {
                 isLocked = (lockM[1] === "LOCKED");
-                const txt = document.getElementById('lockText');
-                const icon = document.getElementById('iconLock');
-                
-                if(isLocked) {
-                    txt.innerText = "已关锁";
-                    txt.style.color = "#1c1c1e";
-                    icon.innerText = "🔒";
-                } else {
-                    txt.innerText = "已开锁";
-                    txt.style.color = "#34C759";
-                    icon.innerText = "🔓";
-                }
+                const div = document.getElementById('lockStatus');
+                div.innerText = isLocked ? "🔒" : "🔓";
+                div.style.color = isLocked ? "#000" : "#34C759";
             }
 
-            // 更新地图: 锁的位置
-            if (latM && lonM) {
+            if(latM && lonM) {
                 let lat = nmeaToDec(latM[1]);
                 let lon = nmeaToDec(lonM[1]);
-                
-                if (lat && lon) {
-                    const pos = [lat, lon];
-                    
-                    // 只有锁打开或者刚连上时，更新实时红点
-                    if (!lockMarker) lockMarker = L.marker(pos, {icon: LockIcon}).addTo(map);
-                    else lockMarker.setLatLng(pos);
+                if(lat && lon) {
+                    if(!lockMarker) lockMarker = L.marker([lat, lon], {icon: LockIcon}).addTo(map);
+                    else lockMarker.setLatLng([lat, lon]);
 
-                    // ★★★ 核心：如果锁是关的，说明车停在这了，更新停车点 ★★★
-                    if (isLocked) {
+                    if(isLocked && lockM) {
                         const now = new Date();
-                        const tStr = `${now.getHours()}:${(now.getMinutes()<10?'0':'')+now.getMinutes()}`;
-                        updateParking(lat, lon, tStr, false);
+                        const t = `${now.getHours()}:${(now.getMinutes()<10?'0':'')+now.getMinutes()}`;
+                        updateParking(lat, lon, t, false);
                     }
                 }
             }
@@ -321,45 +174,54 @@
 
         document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
-                if (!navigator.bluetooth) return alert("请使用 Chrome/Edge 或 Bluefy");
-
-                // 搜索 FFF0
+                // 搜索所有设备，不限制UUID (最大兼容性)
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [SERVICE_UUID] }]
+                    acceptAllDevices: true,
+                    optionalServices: [SERVICE_UUID_FFF0, SERVICE_UUID_FFE0] // 声明可能用到的服务
                 });
 
                 document.getElementById('status').innerText = "连接中...";
-                
                 const server = await device.gatt.connect();
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                // 尝试 FFF1，失败尝试 FFF2 (兼容更多模块)
-                let char;
-                try { char = await service.getCharacteristic(CHAR_UUID); } 
-                catch(e) { char = await service.getCharacteristic(0xFFF2); }
+                
+                // ★★★ 智能扫描逻辑 ★★★
+                // 自动寻找可用的服务和特征值，不再死板地认定 FFF1
+                let service, char;
+                
+                try {
+                    service = await server.getPrimaryService(SERVICE_UUID_FFF0);
+                } catch {
+                    try { service = await server.getPrimaryService(SERVICE_UUID_FFE0); } catch(e){}
+                }
+
+                if(!service) throw new Error("未找到 FFF0 或 FFE0 服务");
+
+                // 获取该服务下所有特征值，找到第一个支持 Notify 的
+                const characteristics = await service.getCharacteristics();
+                for (const c of characteristics) {
+                    if (c.properties.notify) {
+                        char = c;
+                        break;
+                    }
+                }
+
+                if(!char) throw new Error("未找到支持通知的特征值");
 
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', handleData);
 
-                // 连接成功 UI
                 document.getElementById('status').innerText = "在线";
                 document.getElementById('status').classList.add('on');
                 document.getElementById('btnConnect').style.display = "none";
-                
-                // 自动缩放地图，让“我”和“停车点”都可见
-                if(userMarker && parkingMarker) {
-                    const group = new L.featureGroup([userMarker, parkingMarker]);
-                    map.fitBounds(group.getBounds().pad(0.2));
-                }
+                document.getElementById('log').innerText = `已连接: ${service.uuid} -> ${char.uuid}`;
 
                 device.addEventListener('gattserverdisconnected', () => {
                     document.getElementById('status').innerText = "已断开";
                     document.getElementById('status').classList.remove('on');
                     document.getElementById('btnConnect').style.display = "block";
-                    alert("蓝牙断开。最后停车位置已在地图上保存。");
+                    alert("蓝牙已断开");
                 });
 
             } catch (e) {
-                console.error(e);
                 alert("连接失败: " + e.message);
                 document.getElementById('status').innerText = "失败";
             }
