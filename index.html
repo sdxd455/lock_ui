@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Find My Lock</title>
     
+    <!-- Leaflet 地图库 -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
@@ -16,7 +17,7 @@
             --primary-color: #007AFF;
             --danger-color: #FF3B30;
             --success-color: #34C759;
-            --parking-color: #5856D6; /* 紫色代表停车点 */
+            --parking-color: #5856D6;
         }
 
         body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; background: #000; overflow: hidden; height: 100vh; }
@@ -56,7 +57,7 @@
             cursor: pointer; box-shadow: 0 4px 12px rgba(0,122,255,0.3);
         }
 
-        /* 停车信息条 */
+        /* 停车信息 */
         .parking-info {
             margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(0,0,0,0.1);
             display: flex; align-items: center; justify-content: space-between;
@@ -70,6 +71,9 @@
         .park-icon { width: 30px; height: 30px; background: var(--parking-color); border: 2px solid #fff; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 16px; box-shadow: 0 4px 10px rgba(88, 86, 214, 0.4); }
         
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,122,255,0.4); } 70% { box-shadow: 0 0 0 15px rgba(0,122,255,0); } 100% { box-shadow: 0 0 0 0 rgba(0,122,255,0); } }
+        
+        /* 调试日志 */
+        #debugInfo { font-size:10px; color:#bbb; margin-top:10px; text-align:center; height:12px; overflow:hidden; white-space: nowrap; text-overflow: ellipsis;}
     </style>
 </head>
 <body>
@@ -85,16 +89,19 @@
 
             <div class="grid">
                 <div class="box">
-                    <div class="label">实时距离</div>
+                    <div class="label">距离 (Distance)</div>
                     <div id="valDist" class="val">--</div>
                 </div>
                 <div class="box">
-                    <div class="label">状态</div>
+                    <div class="label">状态 (Status)</div>
                     <div id="iconLock" style="font-size: 22px;">🔒</div>
                 </div>
             </div>
 
             <div class="bar-bg"> <div id="distBar" class="bar-fill"></div> </div>
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:#999; margin-top:6px;">
+                <span>0m</span><span>1.5m</span><span>3.0m</span>
+            </div>
             
             <!-- 停车位置记录 -->
             <div class="parking-info" id="parkingInfoArea" style="opacity: 0.5;">
@@ -105,14 +112,14 @@
                 <div id="lastCoords" class="parking-text">--</div>
             </div>
 
-            <div id="debugInfo" style="font-size:10px; color:#bbb; margin-top:10px; text-align:center; height:12px; overflow:hidden;">Waiting...</div>
+            <div id="debugInfo">等待连接...</div>
         </div>
 
-        <button id="btnConnect" class="btn">连接设备</button>
+        <button id="btnConnect" class="btn">📡 搜索并连接 (Search All)</button>
     </div>
 
     <script>
-        // --- 地图初始化 ---
+        // --- 1. 地图初始化 ---
         const map = L.map('map', { zoomControl: false }).setView([31.2304, 121.4737], 15);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '©OpenStreetMap' }).addTo(map);
 
@@ -124,8 +131,7 @@
         let lockMarker = null;
         let parkingMarker = null;
 
-        // --- 存储与恢复 ---
-        // 页面加载时，检查有没有“上次的停车位置”
+        // --- 2. 存储与恢复 ---
         window.onload = function() {
             startUserTracking();
             const savedLat = localStorage.getItem('park_lat');
@@ -133,7 +139,7 @@
             const savedTime = localStorage.getItem('park_time');
 
             if (savedLat && savedLon) {
-                updateParkingLocation(parseFloat(savedLat), parseFloat(savedLon), savedTime, false); // false表示不居中，避免打扰用户
+                updateParkingLocation(parseFloat(savedLat), parseFloat(savedLon), savedTime, false);
             }
         };
 
@@ -144,7 +150,7 @@
                     const lng = position.coords.longitude;
                     if (!userMarker) {
                         userMarker = L.marker([lat, lng], {icon: UserIcon}).addTo(map);
-                        if(!localStorage.getItem('park_lat')) map.setView([lat, lng], 17); // 只有没车时才自动跳到人
+                        if(!localStorage.getItem('park_lat')) map.setView([lat, lng], 17);
                     } else {
                         userMarker.setLatLng([lat, lng]);
                     }
@@ -152,7 +158,8 @@
             }
         }
 
-        // --- 核心逻辑 ---
+        // --- 3. 蓝牙逻辑 (HC-08 兼容版) ---
+        // HC-08 默认服务通常是 FFE0，特征值 FFE1
         const SERVICE_UUID = 0xFFE0;
         const CHAR_UUID = 0xFFE1;
 
@@ -165,38 +172,31 @@
             return deg + (min / 60);
         }
 
-        // 更新停车点（核心功能）
         function updateParkingLocation(lat, lon, timeStr, autoCenter = true) {
-            // 1. 在地图上画 P
             if (!parkingMarker) {
-                parkingMarker = L.marker([lat, lon], {icon: ParkingIcon}).addTo(map).bindPopup("车辆最后已知位置");
+                parkingMarker = L.marker([lat, lon], {icon: ParkingIcon}).addTo(map).bindPopup("车辆最后位置");
             } else {
                 parkingMarker.setLatLng([lat, lon]);
             }
-            
-            // 2. 存入浏览器缓存 (断蓝牙后不丢)
             localStorage.setItem('park_lat', lat);
             localStorage.setItem('park_lon', lon);
             localStorage.setItem('park_time', timeStr);
 
-            // 3. 更新 UI
             document.getElementById('parkingInfoArea').style.opacity = "1";
             document.getElementById('lastSeenTime').innerText = "更新于: " + timeStr;
             document.getElementById('lastCoords').innerText = lat.toFixed(5) + ", " + lon.toFixed(5);
-
             if(autoCenter) map.setView([lat, lon], 18);
         }
 
         function handleData(event) {
             const str = new TextDecoder().decode(event.target.value);
-            document.getElementById('debugInfo').innerText = str.trim();
+            document.getElementById('debugInfo').innerText = "RX: " + str.trim();
 
             const distM = str.match(/DIST:(\d+)/);
             const latM = str.match(/LAT:([\d\.]+)/);
             const lonM = str.match(/LON:([\d\.]+)/);
             const lockM = str.match(/\| (LOCKED|OPEN)/);
 
-            // 更新实时状态
             if (distM) {
                 let d = parseInt(distM[1]);
                 document.getElementById('valDist').innerText = d + " mm";
@@ -209,26 +209,22 @@
             if (lockM) {
                 const isLocked = lockM[1] === "LOCKED";
                 document.getElementById('iconLock').innerText = isLocked ? "🔒" : "🔓";
+                document.getElementById('iconLock').style.color = isLocked ? "#000" : "#34C759";
             }
 
-            // ★★★ 核心：停车位记录逻辑 ★★★
-            // 只有当 GPS 有效，且 锁是关的 (LOCKED) 时，才更新停车位
-            // 这样当你走远断开蓝牙前，最后收到的那个坐标，就是车的位置
             if (latM && lonM && lockM) {
                 let lat = nmeaToDec(latM[1]);
                 let lon = nmeaToDec(lonM[1]);
                 const isLocked = lockM[1] === "LOCKED";
 
                 if (lat && lon) {
-                    // 更新实时红点
                     if (!lockMarker) lockMarker = L.marker([lat, lon], {icon: LockIcon}).addTo(map);
                     else lockMarker.setLatLng([lat, lon]);
 
-                    // 如果处于关锁状态，这可能就是最后的位置，赶紧记下来！
                     if (isLocked) {
                         const now = new Date();
                         const timeStr = now.getHours() + ":" + (now.getMinutes()<10?'0':'') + now.getMinutes();
-                        updateParkingLocation(lat, lon, timeStr, false); // 不自动居中，免得地图乱跳
+                        updateParkingLocation(lat, lon, timeStr, false);
                     }
                 }
             }
@@ -236,10 +232,25 @@
 
         document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
-                const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+                if (!navigator.bluetooth) {
+                    alert('请使用 Chrome/Edge 浏览器');
+                    return;
+                }
+
+                // ★★★ 关键修改：acceptAllDevices: true ★★★
+                // 这会列出附近所有的蓝牙设备，不论它广播什么UUID
+                // 这样能保证你一定能看到 HC-08
+                const device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: [SERVICE_UUID] // 必须声明我们要用的服务
+                });
+
+                document.getElementById('status').innerText = "连接中...";
+                
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 const char = await service.getCharacteristic(CHAR_UUID);
+                
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', handleData);
 
@@ -251,9 +262,14 @@
                     document.getElementById('status').innerText = "已断开";
                     document.getElementById('status').classList.remove('on');
                     document.getElementById('btnConnect').style.display = "block";
-                    alert("蓝牙已断开，地图上显示的是最后记录的停车位置。");
+                    alert("蓝牙已断开 (停车位置已保存)");
                 });
-            } catch (e) { alert("连接失败: " + e); }
+
+            } catch (e) {
+                console.error(e);
+                alert("连接失败: " + e.message + "\n(请确保 HC-08 未被其他设备连接)");
+                document.getElementById('status').innerText = "失败";
+            }
         });
     </script>
 </body>
