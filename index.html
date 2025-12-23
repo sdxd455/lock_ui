@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Find My Lock</title>
+    <title>Find My Lock (Auto-Detect)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { --primary: #007AFF; --success: #34C759; --danger: #FF3B30; --bg: rgba(255,255,255,0.95); }
+        :root { --primary: #007AFF; --success: #34C759; --bg: rgba(255,255,255,0.95); }
         body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #000; height: 100vh; overflow: hidden; }
         #map { height: 100%; width: 100%; }
         .panel { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
@@ -24,6 +24,8 @@
         .bar-fill { height: 100%; width: 0%; background: var(--primary); transition: width 0.3s, background 0.3s; }
         .btn { width: 100%; padding: 16px; background: var(--primary); color: white; border: none; border-radius: 18px; font-size: 16px; font-weight: 600; cursor: pointer; }
         #log { font-size: 10px; color: #aaa; text-align: center; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        /* Icons */
         .user-dot { width: 18px; height: 18px; background: #007AFF; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 10px rgba(0,122,255,0.2); animation: pulse 2s infinite; }
         .lock-dot { width: 30px; height: 30px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
         .park-dot { width: 30px; height: 30px; background: #5856D6; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; border: 2px solid #fff; }
@@ -32,12 +34,14 @@
 </head>
 <body>
     <div id="map"></div>
+    
     <div class="panel">
         <div class="card">
             <div class="header">
                 <div class="title">My Lock</div>
                 <div id="status" class="badge">未连接</div>
             </div>
+            
             <div class="info-grid">
                 <div class="info-box">
                     <div class="label">距离</div>
@@ -48,18 +52,18 @@
                     <div id="lockStatus" class="val">🔒</div>
                 </div>
             </div>
+
             <div class="bar-bg"><div id="distBar" class="bar-fill"></div></div>
             
-            <!-- 停车记录 -->
             <div id="parkingArea" style="margin-top:15px; border-top:1px solid #eee; padding-top:10px; display:none;">
                 <div style="font-size:12px; font-weight:bold; color:#5856D6;">🅿️ 车辆位置已保存</div>
                 <div id="parkTime" style="font-size:10px; color:#999;">--:--</div>
                 <div id="parkCoords" style="font-size:10px; font-family:monospace; color:#666;"></div>
             </div>
-            
+
             <div id="log">Waiting...</div>
         </div>
-        <button id="btnConnect" class="btn">📡 连接 HC-08 (稳定版)</button>
+        <button id="btnConnect" class="btn">📡 连接设备 (自动匹配)</button>
     </div>
 
     <script>
@@ -71,9 +75,9 @@
         const ParkIcon = L.divIcon({ className: 'c', html: '<div class="park-dot">P</div>', iconSize: [34,34] });
         
         let userMarker, lockMarker, parkMarker;
-        let dataBuffer = ""; // 数据缓存
+        let dataBuffer = "";
 
-        // 1. 恢复停车点
+        // 1. 恢复停车记录
         window.onload = () => {
             if(navigator.geolocation) navigator.geolocation.watchPosition(updateUserPos, null, {enableHighAccuracy:true});
             const lat = localStorage.getItem('p_lat'), lon = localStorage.getItem('p_lon'), t = localStorage.getItem('p_time');
@@ -106,6 +110,7 @@
 
         function processLine(str) {
             document.getElementById('log').innerText = "RX: " + str;
+            
             const distM = str.match(/DIST:(\d+)/);
             const latM = str.match(/LAT:([\d\.]+)/);
             const lonM = str.match(/LON:([\d\.]+)/);
@@ -119,6 +124,7 @@
                 bar.style.width = w + "%";
                 bar.style.background = d<1500 ? "#34C759" : (d>3000 ? "#FF3B30" : "#007AFF");
             }
+
             let isLocked = true;
             if(lockM) {
                 isLocked = (lockM[1] === "LOCKED");
@@ -126,12 +132,14 @@
                 div.innerText = isLocked ? "🔒" : "🔓";
                 div.style.color = isLocked ? "#000" : "#34C759";
             }
+
             if(latM && lonM) {
                 let lat = nmeaToDec(latM[1]);
                 let lon = nmeaToDec(lonM[1]);
                 if(lat && lon) {
                     if(!lockMarker) lockMarker = L.marker([lat, lon], {icon: LockIcon}).addTo(map);
                     else lockMarker.setLatLng([lat, lon]);
+
                     if(isLocked && lockM) {
                         const now = new Date();
                         const t = `${now.getHours()}:${(now.getMinutes()<10?'0':'')+now.getMinutes()}`;
@@ -141,7 +149,6 @@
             }
         }
 
-        // 2. 数据拼接逻辑
         function handleData(event) {
             const str = new TextDecoder().decode(event.target.value);
             dataBuffer += str;
@@ -154,37 +161,57 @@
             }
         }
 
-        // ★★★ 核心修改：锁定 UUID FFF0 ★★★
-        const SERVICE_UUID = 0xFFF0;
-        
+        const UUID_FFF0 = 0xFFF0; 
+
         document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
                 if (!navigator.bluetooth) return alert("请使用 Chrome/Edge 或 Bluefy");
 
-                // 使用 filters 精准搜索，解决连接失败问题
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [SERVICE_UUID] }]
+                    filters: [{ services: [UUID_FFF0] }]
                 });
 
-                document.getElementById('status').innerText = "连接中...";
+                document.getElementById('status').innerText = "连接 GATT...";
                 const server = await device.gatt.connect();
-                const service = await server.getPrimaryService(SERVICE_UUID);
                 
-                // 自动寻找特征值 (FFF1/FFF2)
-                const characteristics = await service.getCharacteristics();
-                let char = null;
-                for (const c of characteristics) {
-                    if (c.properties.notify) { char = c; break; }
-                }
-                if(!char) throw new Error("特征值不支持通知");
+                document.getElementById('status').innerText = "获取服务...";
+                const service = await server.getPrimaryService(UUID_FFF0);
 
-                await char.startNotifications();
-                char.addEventListener('characteristicvaluechanged', handleData);
+                document.getElementById('status').innerText = "寻找特征值...";
+                
+                // ★★★ 核心修改：遍历所有特征值，找到那个能 Notify 的 ★★★
+                const characteristics = await service.getCharacteristics();
+                let targetChar = null;
+                
+                for (const char of characteristics) {
+                    // 检查特征值是否有 notify 属性
+                    if (char.properties.notify) {
+                        console.log("找到通知特征值:", char.uuid);
+                        targetChar = char;
+                        break; 
+                    }
+                }
+
+                if (!targetChar) {
+                    // 如果没找到 Notify，尝试找 Indicate (备选)
+                    for (const char of characteristics) {
+                        if (char.properties.indicate) {
+                            targetChar = char;
+                            break;
+                        }
+                    }
+                }
+
+                if (!targetChar) throw new Error("该模块没有支持通知(Notify)的特征值");
+
+                // 订阅数据
+                await targetChar.startNotifications();
+                targetChar.addEventListener('characteristicvaluechanged', handleData);
 
                 document.getElementById('status').innerText = "在线";
                 document.getElementById('status').classList.add('on');
                 document.getElementById('btnConnect').style.display = "none";
-                document.getElementById('log').innerText = "连接成功";
+                document.getElementById('log').innerText = `已连接特征值: ${targetChar.uuid}`;
 
                 device.addEventListener('gattserverdisconnected', () => {
                     document.getElementById('status').innerText = "已断开";
@@ -192,8 +219,10 @@
                     document.getElementById('btnConnect').style.display = "block";
                     alert("蓝牙已断开");
                 });
+
             } catch (e) {
-                alert("连接失败: " + e.message + "\n请尝试: 1.取消配对 2.重启蓝牙");
+                console.error(e);
+                alert("连接失败: " + e.message);
                 document.getElementById('status').innerText = "失败";
             }
         });
