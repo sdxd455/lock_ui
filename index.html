@@ -3,127 +3,111 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Find My Lock (Diagnostic)</title>
+    <title>Find My Lock (iOS Fix)</title>
     <style>
-        body { font-family: monospace; background: #222; color: #fff; padding: 20px; }
-        button { width: 100%; padding: 20px; font-size: 18px; background: #007AFF; color: white; border: none; border-radius: 10px; margin-bottom: 20px; }
-        #console { background: #000; padding: 10px; border: 1px solid #444; height: 300px; overflow-y: auto; white-space: pre-wrap; font-size: 12px; }
-        .log-step { color: #0ff; }
-        .log-ok { color: #0f0; }
-        .log-err { color: #f55; font-weight: bold; border: 1px solid #f55; padding: 5px; margin: 5px 0; }
-        .log-data { color: #ff0; }
+        body { font-family: -apple-system, monospace; background: #000; color: #fff; padding: 20px; }
+        button { width: 100%; padding: 20px; font-size: 18px; background: #007AFF; color: white; border: none; border-radius: 12px; margin-bottom: 20px; }
+        #console { background: #1c1c1e; padding: 15px; border-radius: 12px; height: 400px; overflow-y: auto; white-space: pre-wrap; font-size: 12px; border: 1px solid #333; }
+        .log-step { color: #64D2FF; }
+        .log-ok { color: #30D158; }
+        .log-err { color: #FF453A; font-weight: bold; border-left: 3px solid #FF453A; padding-left: 10px; }
+        .log-data { color: #FFD60A; }
     </style>
 </head>
 <body>
-    <h1>故障诊断模式</h1>
-    <button id="btn">点击开始诊断连接</button>
-    <div id="console">等待操作...</div>
+    <h1>iOS 专用连接</h1>
+    <button id="btn">点击连接设备</button>
+    <div id="console">准备就绪...</div>
 
     <script>
         function log(msg, type='') {
             const box = document.getElementById('console');
             const div = document.createElement('div');
-            const time = new Date().toLocaleTimeString();
+            const time = new Date().toLocaleTimeString().split(' ')[0];
             div.className = 'log-' + type;
             div.innerText = `[${time}] ${msg}`;
             box.appendChild(div);
             box.scrollTop = box.scrollHeight;
         }
 
-        // 根据你提供的模块信息：
-        // 搜索 UUID: FFF0
-        // 数据 UUID: FFE0 -> FFE1
-        const UUID_SEARCH = 0xFFF0;
-        const UUID_DATA_SERVICE = 0xFFE0;
-        const UUID_DATA_CHAR = 0xFFE1;
+        // ★★★ 核心修改：使用完整的 128位 UUID 字符串 (小写) ★★★
+        // 只有这样写，Bluefy 才能正确识别！
+        const UUID_SEARCH       = "0000fff0-0000-1000-8000-00805f9b34fb"; // 搜索用
+        const UUID_DATA_SERVICE = "0000ffe0-0000-1000-8000-00805f9b34fb"; // 数据服务
+        // const UUID_DATA_CHAR    = "0000ffe1-0000-1000-8000-00805f9b34fb"; // 特征值
 
         document.getElementById('btn').addEventListener('click', async () => {
             try {
-                log("--- 开始流程 ---");
+                log("--- 开始流程 (iOS Fix) ---");
                 
-                // 1. 环境检查
-                if (!navigator.bluetooth) throw new Error("浏览器不支持 Web Bluetooth");
-                log("浏览器环境: OK", "ok");
+                if (!navigator.bluetooth) throw "浏览器不支持蓝牙 (请确认使用Bluefy)";
 
-                // 2. 搜索设备
-                log(`正在搜索服务: 0x${UUID_SEARCH.toString(16)}`, "step");
+                // 1. 搜索设备
+                log(`正在搜索...`, "step");
                 
-                // 这里我们显式声明所有可能用到的服务，防止“有权限连接没权限读数据”
                 const device = await navigator.bluetooth.requestDevice({
+                    // 必须使用完整字符串 UUID
                     filters: [{ services: [UUID_SEARCH] }],
                     optionalServices: [UUID_DATA_SERVICE, UUID_SEARCH] 
                 });
 
-                log(`已选设备: ${device.name} (ID: ${device.id})`, "ok");
+                log(`已选设备: ${device.name}`, "ok");
                 
-                // 3. 连接 GATT
-                log("正在连接 GATT Server...", "step");
+                // 2. 连接 GATT
+                log("正在连接...", "step");
                 const server = await device.gatt.connect();
-                
-                if(!server.connected) throw new Error("GATT 连接虽然返回了但状态仍为断开");
                 log("GATT 连接成功", "ok");
 
-                // 4. 获取服务
-                log(`正在获取数据服务: 0x${UUID_DATA_SERVICE.toString(16)}...`, "step");
+                // 3. 获取服务 (优先找 FFE0)
+                log("获取服务...", "step");
                 let service;
                 try {
                     service = await server.getPrimaryService(UUID_DATA_SERVICE);
-                    log("成功获取到 FFE0 服务", "ok");
+                    log("找到数据服务 FFE0", "ok");
                 } catch(e) {
-                    log("获取 FFE0 失败，尝试获取 FFF0...", "step");
+                    log("未找到 FFE0，尝试 FFF0...", "step");
                     service = await server.getPrimaryService(UUID_SEARCH);
-                    log("成功获取到 FFF0 服务", "ok");
+                    log("找到服务 FFF0", "ok");
                 }
 
-                if(!service) throw new Error("未找到任何可用服务 (FFE0/FFF0)");
-
-                // 5. 获取特征值
-                log("正在获取特征值...", "step");
+                // 4. 自动扫描特征值 (全兼容)
+                log("扫描特征值...", "step");
                 const characteristics = await service.getCharacteristics();
                 
                 let targetChar = null;
-                log(`发现 ${characteristics.length} 个特征值:`);
-                
                 for (const c of characteristics) {
-                    const props = [];
-                    if(c.properties.read) props.push("Read");
-                    if(c.properties.write) props.push("Write");
-                    if(c.properties.notify) props.push("Notify");
-                    if(c.properties.indicate) props.push("Indicate");
-                    
-                    log(` - ${c.uuid} [${props.join(',')}]`);
-                    
-                    // 优先找 FFE1，或者任何支持 Notify 的
-                    if ((c.uuid.indexOf("ffe1") !== -1 || c.uuid.indexOf("fff1") !== -1) && c.properties.notify) {
+                    log(`发现特征: ${c.uuid.substring(0,8)}...`, "step");
+                    if (c.properties.notify) {
                         targetChar = c;
-                    } else if (!targetChar && c.properties.notify) {
-                        targetChar = c; // 备选
+                        break;
                     }
                 }
 
-                if(!targetChar) throw new Error("没有找到支持 Notify (通知) 的特征值");
+                if(!targetChar) throw "未找到支持 Notify 的特征值";
                 
-                log(`选中特征值: ${targetChar.uuid}`, "ok");
+                log(`选中特征: ${targetChar.uuid.substring(0,8)}...`, "ok");
 
-                // 6. 开启通知
-                log("正在开启通知流...", "step");
+                // 5. 开启通知
                 await targetChar.startNotifications();
-                log("通知已开启！等待数据...", "ok");
+                log("✅ 监听已开启！等待数据...", "ok");
                 
                 targetChar.addEventListener('characteristicvaluechanged', (event) => {
                     const str = new TextDecoder().decode(event.target.value);
-                    log(`收到数据: ${str}`, "data");
+                    log(`RX: ${str.trim()}`, "data");
                 });
 
                 device.addEventListener('gattserverdisconnected', () => {
-                    log("!!! 蓝牙意外断开 !!!", "err");
-                    alert("蓝牙断开");
+                    log("❌ 蓝牙已断开", "err");
+                    alert("断开连接");
                 });
 
-            } catch (e) {
-                console.error(e);
-                log(`❌ 发生错误:\n${e.name}: ${e.message}`, "err");
-                alert("错误: " + e.message);
+            } catch (error) {
+                // 增强版错误捕获，防止显示 undefined
+                let msg = error;
+                if (typeof error === 'object') {
+                    msg = error.message || JSON.stringify(error);
+                }
+                log(`错误: ${msg}`, "err");
             }
         });
     </script>
