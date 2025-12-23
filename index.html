@@ -2,224 +2,128 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Find My Lock (Force Scan)</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Find My Lock (Diagnostic)</title>
     <style>
-        :root { --primary: #007AFF; --success: #34C759; --danger: #FF3B30; --bg: rgba(255,255,255,0.95); }
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #000; height: 100vh; overflow: hidden; }
-        #map { height: 100%; width: 100%; }
-        .panel { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
-        .card { background: var(--bg); backdrop-filter: blur(20px); border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .title { font-size: 20px; font-weight: 700; color: #000; }
-        .badge { font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; background: #eee; color: #888; }
-        .badge.on { background: var(--success); color: #fff; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .info-box { background: rgba(255,255,255,0.5); padding: 10px; border-radius: 12px; text-align: center; }
-        .label { font-size: 11px; color: #888; text-transform: uppercase; }
-        .val { font-size: 18px; font-weight: 700; color: #000; }
-        .bar-bg { height: 6px; background: #eee; border-radius: 3px; margin-top: 15px; overflow: hidden; }
-        .bar-fill { height: 100%; width: 0%; background: var(--primary); transition: width 0.3s, background 0.3s; }
-        .btn { width: 100%; padding: 16px; background: var(--primary); color: white; border: none; border-radius: 18px; font-size: 16px; font-weight: 600; cursor: pointer; }
-        #log { font-size: 10px; color: #aaa; text-align: center; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        
-        .user-dot { width: 18px; height: 18px; background: #007AFF; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 10px rgba(0,122,255,0.2); animation: pulse 2s infinite; }
-        .lock-dot { width: 30px; height: 30px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
-        .park-dot { width: 30px; height: 30px; background: #5856D6; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; border: 2px solid #fff; }
-        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,122,255,0.4); } 70% { box-shadow: 0 0 0 15px rgba(0,122,255,0); } }
+        body { font-family: monospace; background: #222; color: #fff; padding: 20px; }
+        button { width: 100%; padding: 20px; font-size: 18px; background: #007AFF; color: white; border: none; border-radius: 10px; margin-bottom: 20px; }
+        #console { background: #000; padding: 10px; border: 1px solid #444; height: 300px; overflow-y: auto; white-space: pre-wrap; font-size: 12px; }
+        .log-step { color: #0ff; }
+        .log-ok { color: #0f0; }
+        .log-err { color: #f55; font-weight: bold; border: 1px solid #f55; padding: 5px; margin: 5px 0; }
+        .log-data { color: #ff0; }
     </style>
 </head>
 <body>
-    <div id="map"></div>
-    
-    <div class="panel">
-        <div class="card">
-            <div class="header">
-                <div class="title">My Lock</div>
-                <div id="status" class="badge">未连接</div>
-            </div>
-            
-            <div class="info-grid">
-                <div class="info-box">
-                    <div class="label">距离</div>
-                    <div id="distVal" class="val">--</div>
-                </div>
-                <div class="info-box">
-                    <div class="label">状态</div>
-                    <div id="lockStatus" class="val">🔒</div>
-                </div>
-            </div>
-
-            <div class="bar-bg"><div id="distBar" class="bar-fill"></div></div>
-            
-            <div id="parkingArea" style="margin-top:15px; border-top:1px solid #eee; padding-top:10px; display:none;">
-                <div style="font-size:12px; font-weight:bold; color:#5856D6;">🅿️ 车辆位置已保存</div>
-                <div id="parkTime" style="font-size:10px; color:#999;">--:--</div>
-                <div id="parkCoords" style="font-size:10px; font-family:monospace; color:#666;"></div>
-            </div>
-
-            <div id="log">Checking Env...</div>
-        </div>
-        <button id="btnConnect" class="btn">📡 暴力搜索所有设备</button>
-    </div>
+    <h1>故障诊断模式</h1>
+    <button id="btn">点击开始诊断连接</button>
+    <div id="console">等待操作...</div>
 
     <script>
-        const map = L.map('map', { zoomControl: false }).setView([31.2304, 121.4737], 15);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '©OSM' }).addTo(map);
-        
-        const UserIcon = L.divIcon({ className: 'c', html: '<div class="user-dot"></div>', iconSize: [24,24] });
-        const LockIcon = L.divIcon({ className: 'c', html: '<div class="lock-dot">🔴</div>', iconSize: [30,30] });
-        const ParkIcon = L.divIcon({ className: 'c', html: '<div class="park-dot">P</div>', iconSize: [34,34] });
-        
-        let userMarker, lockMarker, parkMarker;
-        let dataBuffer = "";
-
-        // 环境自检
-        window.onload = () => {
-            let err = "";
-            if (!navigator.bluetooth) err = "当前浏览器不支持蓝牙 (请用 Chrome/Bluefy)";
-            else if (location.protocol !== 'https:' && location.hostname !== 'localhost') err = "必须使用 HTTPS 访问！";
-            
-            if(err) {
-                alert("❌ 环境错误:\n" + err);
-                document.getElementById('log').innerText = "环境不支持";
-                document.getElementById('btnConnect').disabled = true;
-                document.getElementById('btnConnect').style.background = "#ccc";
-            } else {
-                document.getElementById('log').innerText = "Ready to connect.";
-                if(navigator.geolocation) navigator.geolocation.watchPosition(updateUserPos, null, {enableHighAccuracy:true});
-                const lat = localStorage.getItem('p_lat'), lon = localStorage.getItem('p_lon'), t = localStorage.getItem('p_time');
-                if(lat && lon) updateParking(parseFloat(lat), parseFloat(lon), t, false);
-            }
-        };
-
-        function updateUserPos(pos) {
-            const ll = [pos.coords.latitude, pos.coords.longitude];
-            if(!userMarker) {
-                userMarker = L.marker(ll, {icon: UserIcon}).addTo(map);
-                if(!parkMarker) map.setView(ll, 17);
-            } else userMarker.setLatLng(ll);
+        function log(msg, type='') {
+            const box = document.getElementById('console');
+            const div = document.createElement('div');
+            const time = new Date().toLocaleTimeString();
+            div.className = 'log-' + type;
+            div.innerText = `[${time}] ${msg}`;
+            box.appendChild(div);
+            box.scrollTop = box.scrollHeight;
         }
 
-        function updateParking(lat, lon, time, center=true) {
-            if(!parkMarker) parkMarker = L.marker([lat, lon], {icon: ParkIcon}).addTo(map).bindPopup("停车点");
-            else parkMarker.setLatLng([lat, lon]);
-            localStorage.setItem('p_lat', lat); localStorage.setItem('p_lon', lon); localStorage.setItem('p_time', time);
-            document.getElementById('parkingArea').style.display = 'block';
-            document.getElementById('parkTime').innerText = "更新于 " + time;
-            document.getElementById('parkCoords').innerText = lat.toFixed(5) + ", " + lon.toFixed(5);
-            if(center) map.setView([lat, lon], 18);
-        }
+        // 根据你提供的模块信息：
+        // 搜索 UUID: FFF0
+        // 数据 UUID: FFE0 -> FFE1
+        const UUID_SEARCH = 0xFFF0;
+        const UUID_DATA_SERVICE = 0xFFE0;
+        const UUID_DATA_CHAR = 0xFFE1;
 
-        function nmeaToDec(val) {
-            if(!val) return null;
-            let v = parseFloat(val); if(isNaN(v)) return null;
-            return Math.floor(v/100) + (v%100)/60;
-        }
-
-        function processLine(str) {
-            document.getElementById('log').innerText = "RX: " + str;
-            const distM = str.match(/DIST:(\d+)/);
-            const latM = str.match(/LAT:([\d\.]+)/);
-            const lonM = str.match(/LON:([\d\.]+)/);
-            const lockM = str.match(/\| (LOCKED|OPEN)/);
-
-            if(distM) {
-                let d = parseInt(distM[1]);
-                document.getElementById('distVal').innerText = d + " mm";
-                let w = (d/3000)*100; if(w>100) w=100;
-                const bar = document.getElementById('distBar');
-                bar.style.width = w + "%";
-                bar.style.background = d<1500 ? "#34C759" : (d>3000 ? "#FF3B30" : "#007AFF");
-            }
-            let isLocked = true;
-            if(lockM) {
-                isLocked = (lockM[1] === "LOCKED");
-                const div = document.getElementById('lockStatus');
-                div.innerText = isLocked ? "🔒" : "🔓";
-                div.style.color = isLocked ? "#000" : "#34C759";
-            }
-            if(latM && lonM) {
-                let lat = nmeaToDec(latM[1]);
-                let lon = nmeaToDec(lonM[1]);
-                if(lat && lon) {
-                    if(!lockMarker) lockMarker = L.marker([lat, lon], {icon: LockIcon}).addTo(map);
-                    else lockMarker.setLatLng([lat, lon]);
-                    if(isLocked && lockM) {
-                        const now = new Date();
-                        const t = `${now.getHours()}:${(now.getMinutes()<10?'0':'')+now.getMinutes()}`;
-                        updateParking(lat, lon, t, false);
-                    }
-                }
-            }
-        }
-
-        function handleData(event) {
-            const str = new TextDecoder().decode(event.target.value);
-            dataBuffer += str;
-            let idx = dataBuffer.indexOf('\n');
-            while (idx !== -1) {
-                const line = dataBuffer.substring(0, idx).trim();
-                if (line.length > 0) processLine(line);
-                dataBuffer = dataBuffer.substring(idx + 1);
-                idx = dataBuffer.indexOf('\n');
-            }
-        }
-
-        // 定义可能的 UUID
-        const UUID_FFF0 = 0xFFF0; 
-        const UUID_FFE0 = 0xFFE0;
-
-        document.getElementById('btnConnect').addEventListener('click', async () => {
+        document.getElementById('btn').addEventListener('click', async () => {
             try {
-                if (!navigator.bluetooth) return alert("不支持蓝牙API");
+                log("--- 开始流程 ---");
+                
+                // 1. 环境检查
+                if (!navigator.bluetooth) throw new Error("浏览器不支持 Web Bluetooth");
+                log("浏览器环境: OK", "ok");
 
-                // ★★★ 核心修改：acceptAllDevices 暴力搜索 ★★★
-                // 必须配合 optionalServices，否则连上后没权限访问服务
+                // 2. 搜索设备
+                log(`正在搜索服务: 0x${UUID_SEARCH.toString(16)}`, "step");
+                
+                // 这里我们显式声明所有可能用到的服务，防止“有权限连接没权限读数据”
                 const device = await navigator.bluetooth.requestDevice({
-                    acceptAllDevices: true,
-                    optionalServices: [UUID_FFF0, UUID_FFE0] 
+                    filters: [{ services: [UUID_SEARCH] }],
+                    optionalServices: [UUID_DATA_SERVICE, UUID_SEARCH] 
                 });
 
-                document.getElementById('status').innerText = "连接中...";
+                log(`已选设备: ${device.name} (ID: ${device.id})`, "ok");
+                
+                // 3. 连接 GATT
+                log("正在连接 GATT Server...", "step");
                 const server = await device.gatt.connect();
                 
-                // 尝试寻找服务
+                if(!server.connected) throw new Error("GATT 连接虽然返回了但状态仍为断开");
+                log("GATT 连接成功", "ok");
+
+                // 4. 获取服务
+                log(`正在获取数据服务: 0x${UUID_DATA_SERVICE.toString(16)}...`, "step");
                 let service;
-                try { service = await server.getPrimaryService(UUID_FFF0); } 
-                catch { try { service = await server.getPrimaryService(UUID_FFE0); } catch(e){} }
-
-                if(!service) throw new Error("连接成功，但未找到 FFF0/FFE0 服务");
-
-                // 自动寻找特征值
-                const characteristics = await service.getCharacteristics();
-                let char = null;
-                for (const c of characteristics) {
-                    if (c.properties.notify) { char = c; break; }
+                try {
+                    service = await server.getPrimaryService(UUID_DATA_SERVICE);
+                    log("成功获取到 FFE0 服务", "ok");
+                } catch(e) {
+                    log("获取 FFE0 失败，尝试获取 FFF0...", "step");
+                    service = await server.getPrimaryService(UUID_SEARCH);
+                    log("成功获取到 FFF0 服务", "ok");
                 }
-                if(!char) throw new Error("未找到数据通道");
 
-                await char.startNotifications();
-                char.addEventListener('characteristicvaluechanged', handleData);
+                if(!service) throw new Error("未找到任何可用服务 (FFE0/FFF0)");
 
-                document.getElementById('status').innerText = "在线";
-                document.getElementById('status').classList.add('on');
-                document.getElementById('btnConnect').style.display = "none";
-                document.getElementById('log').innerText = "Connected to " + device.name;
+                // 5. 获取特征值
+                log("正在获取特征值...", "step");
+                const characteristics = await service.getCharacteristics();
+                
+                let targetChar = null;
+                log(`发现 ${characteristics.length} 个特征值:`);
+                
+                for (const c of characteristics) {
+                    const props = [];
+                    if(c.properties.read) props.push("Read");
+                    if(c.properties.write) props.push("Write");
+                    if(c.properties.notify) props.push("Notify");
+                    if(c.properties.indicate) props.push("Indicate");
+                    
+                    log(` - ${c.uuid} [${props.join(',')}]`);
+                    
+                    // 优先找 FFE1，或者任何支持 Notify 的
+                    if ((c.uuid.indexOf("ffe1") !== -1 || c.uuid.indexOf("fff1") !== -1) && c.properties.notify) {
+                        targetChar = c;
+                    } else if (!targetChar && c.properties.notify) {
+                        targetChar = c; // 备选
+                    }
+                }
+
+                if(!targetChar) throw new Error("没有找到支持 Notify (通知) 的特征值");
+                
+                log(`选中特征值: ${targetChar.uuid}`, "ok");
+
+                // 6. 开启通知
+                log("正在开启通知流...", "step");
+                await targetChar.startNotifications();
+                log("通知已开启！等待数据...", "ok");
+                
+                targetChar.addEventListener('characteristicvaluechanged', (event) => {
+                    const str = new TextDecoder().decode(event.target.value);
+                    log(`收到数据: ${str}`, "data");
+                });
 
                 device.addEventListener('gattserverdisconnected', () => {
-                    document.getElementById('status').innerText = "已断开";
-                    document.getElementById('status').classList.remove('on');
-                    document.getElementById('btnConnect').style.display = "block";
-                    alert("蓝牙已断开");
+                    log("!!! 蓝牙意外断开 !!!", "err");
+                    alert("蓝牙断开");
                 });
 
             } catch (e) {
-                // ★★★ 详细的错误弹窗 ★★★
-                alert("错误: " + e.message + "\n\n1. 确保网址是 HTTPS\n2. 确保没有其他APP连接设备\n3. 确保电脑/手机蓝牙已开");
-                document.getElementById('status').innerText = "失败";
+                console.error(e);
+                log(`❌ 发生错误:\n${e.name}: ${e.message}`, "err");
+                alert("错误: " + e.message);
             }
         });
     </script>
