@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Find My Lock (Dual UUID)</title>
+    <title>Find My Lock (Force Scan)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { --primary: #007AFF; --success: #34C759; --bg: rgba(255,255,255,0.95); }
+        :root { --primary: #007AFF; --success: #34C759; --danger: #FF3B30; --bg: rgba(255,255,255,0.95); }
         body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #000; height: 100vh; overflow: hidden; }
         #map { height: 100%; width: 100%; }
         .panel { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
@@ -60,9 +60,9 @@
                 <div id="parkCoords" style="font-size:10px; font-family:monospace; color:#666;"></div>
             </div>
 
-            <div id="log">Waiting...</div>
+            <div id="log">Checking Env...</div>
         </div>
-        <button id="btnConnect" class="btn">📡 连接 (双通道模式)</button>
+        <button id="btnConnect" class="btn">📡 暴力搜索所有设备</button>
     </div>
 
     <script>
@@ -76,10 +76,23 @@
         let userMarker, lockMarker, parkMarker;
         let dataBuffer = "";
 
+        // 环境自检
         window.onload = () => {
-            if(navigator.geolocation) navigator.geolocation.watchPosition(updateUserPos, null, {enableHighAccuracy:true});
-            const lat = localStorage.getItem('p_lat'), lon = localStorage.getItem('p_lon'), t = localStorage.getItem('p_time');
-            if(lat && lon) updateParking(parseFloat(lat), parseFloat(lon), t, false);
+            let err = "";
+            if (!navigator.bluetooth) err = "当前浏览器不支持蓝牙 (请用 Chrome/Bluefy)";
+            else if (location.protocol !== 'https:' && location.hostname !== 'localhost') err = "必须使用 HTTPS 访问！";
+            
+            if(err) {
+                alert("❌ 环境错误:\n" + err);
+                document.getElementById('log').innerText = "环境不支持";
+                document.getElementById('btnConnect').disabled = true;
+                document.getElementById('btnConnect').style.background = "#ccc";
+            } else {
+                document.getElementById('log').innerText = "Ready to connect.";
+                if(navigator.geolocation) navigator.geolocation.watchPosition(updateUserPos, null, {enableHighAccuracy:true});
+                const lat = localStorage.getItem('p_lat'), lon = localStorage.getItem('p_lon'), t = localStorage.getItem('p_time');
+                if(lat && lon) updateParking(parseFloat(lat), parseFloat(lon), t, false);
+            }
         };
 
         function updateUserPos(pos) {
@@ -108,7 +121,6 @@
 
         function processLine(str) {
             document.getElementById('log').innerText = "RX: " + str;
-            
             const distM = str.match(/DIST:(\d+)/);
             const latM = str.match(/LAT:([\d\.]+)/);
             const lonM = str.match(/LON:([\d\.]+)/);
@@ -122,7 +134,6 @@
                 bar.style.width = w + "%";
                 bar.style.background = d<1500 ? "#34C759" : (d>3000 ? "#FF3B30" : "#007AFF");
             }
-
             let isLocked = true;
             if(lockM) {
                 isLocked = (lockM[1] === "LOCKED");
@@ -130,14 +141,12 @@
                 div.innerText = isLocked ? "🔒" : "🔓";
                 div.style.color = isLocked ? "#000" : "#34C759";
             }
-
             if(latM && lonM) {
                 let lat = nmeaToDec(latM[1]);
                 let lon = nmeaToDec(lonM[1]);
                 if(lat && lon) {
                     if(!lockMarker) lockMarker = L.marker([lat, lon], {icon: LockIcon}).addTo(map);
                     else lockMarker.setLatLng([lat, lon]);
-
                     if(isLocked && lockM) {
                         const now = new Date();
                         const t = `${now.getHours()}:${(now.getMinutes()<10?'0':'')+now.getMinutes()}`;
@@ -159,55 +168,38 @@
             }
         }
 
-        // ★★★ 核心 UUID 配置 ★★★
-        const UUID_FFF0 = 0xFFF0; // 搜索用
-        const UUID_FFE0 = 0xFFE0; // 数据用
-        const UUID_FFE1 = 0xFFE1; // 数据用
+        // 定义可能的 UUID
+        const UUID_FFF0 = 0xFFF0; 
+        const UUID_FFE0 = 0xFFE0;
 
         document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
-                if (!navigator.bluetooth) return alert("请使用 Chrome/Edge 或 Bluefy");
+                if (!navigator.bluetooth) return alert("不支持蓝牙API");
 
-                // 1. 双网捕捉：同时搜索 FFF0 和 FFE0
-                // 并申请 FFE0 的访问权限
+                // ★★★ 核心修改：acceptAllDevices 暴力搜索 ★★★
+                // 必须配合 optionalServices，否则连上后没权限访问服务
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [
-                        { services: [UUID_FFF0] },
-                        { services: [UUID_FFE0] }
-                    ],
-                    optionalServices: [UUID_FFE0, UUID_FFF0] 
+                    acceptAllDevices: true,
+                    optionalServices: [UUID_FFF0, UUID_FFE0] 
                 });
 
                 document.getElementById('status').innerText = "连接中...";
                 const server = await device.gatt.connect();
                 
-                // 2. 尝试获取数据服务 (FFE0 或 FFF0)
+                // 尝试寻找服务
                 let service;
-                try { 
-                    service = await server.getPrimaryService(UUID_FFE0); 
-                    console.log("Got FFE0");
-                } catch { 
-                    try { 
-                        service = await server.getPrimaryService(UUID_FFF0); 
-                        console.log("Got FFF0");
-                    } catch(e){} 
+                try { service = await server.getPrimaryService(UUID_FFF0); } 
+                catch { try { service = await server.getPrimaryService(UUID_FFE0); } catch(e){} }
+
+                if(!service) throw new Error("连接成功，但未找到 FFF0/FFE0 服务");
+
+                // 自动寻找特征值
+                const characteristics = await service.getCharacteristics();
+                let char = null;
+                for (const c of characteristics) {
+                    if (c.properties.notify) { char = c; break; }
                 }
-
-                if(!service) throw new Error("无法获取服务 (FFE0/FFF0)");
-
-                // 3. 尝试获取特征值
-                let char;
-                try {
-                    char = await service.getCharacteristic(UUID_FFE1); // 优先找 FFE1
-                } catch {
-                    // 如果 FFE1 找不到，遍历找第一个能 Notify 的
-                    const characteristics = await service.getCharacteristics();
-                    for (const c of characteristics) {
-                        if (c.properties.notify) { char = c; break; }
-                    }
-                }
-
-                if(!char) throw new Error("未找到数据特征值");
+                if(!char) throw new Error("未找到数据通道");
 
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', handleData);
@@ -215,7 +207,7 @@
                 document.getElementById('status').innerText = "在线";
                 document.getElementById('status').classList.add('on');
                 document.getElementById('btnConnect').style.display = "none";
-                document.getElementById('log').innerText = "连接成功！";
+                document.getElementById('log').innerText = "Connected to " + device.name;
 
                 device.addEventListener('gattserverdisconnected', () => {
                     document.getElementById('status').innerText = "已断开";
@@ -225,10 +217,8 @@
                 });
 
             } catch (e) {
-                console.error(e);
-                let msg = e.message;
-                if(msg.includes("GATT Server is disconnected")) msg = "设备被占用或信号弱";
-                alert("连接失败: " + msg + "\n\n请检查：\n1. 手机蓝牙关闭再开\n2. 确保没有其他APP连接该模块");
+                // ★★★ 详细的错误弹窗 ★★★
+                alert("错误: " + e.message + "\n\n1. 确保网址是 HTTPS\n2. 确保没有其他APP连接设备\n3. 确保电脑/手机蓝牙已开");
                 document.getElementById('status').innerText = "失败";
             }
         });
