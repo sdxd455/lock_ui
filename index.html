@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Find My Lock (Custom UUID)</title>
+    <title>Find My Lock (Dual UUID)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -62,7 +62,7 @@
 
             <div id="log">Waiting...</div>
         </div>
-        <button id="btnConnect" class="btn">📡 连接 (Search: FFF0, Data: FFE1)</button>
+        <button id="btnConnect" class="btn">📡 连接 (双通道模式)</button>
     </div>
 
     <script>
@@ -76,7 +76,6 @@
         let userMarker, lockMarker, parkMarker;
         let dataBuffer = "";
 
-        // 1. 恢复记录
         window.onload = () => {
             if(navigator.geolocation) navigator.geolocation.watchPosition(updateUserPos, null, {enableHighAccuracy:true});
             const lat = localStorage.getItem('p_lat'), lon = localStorage.getItem('p_lon'), t = localStorage.getItem('p_time');
@@ -160,32 +159,55 @@
             }
         }
 
-        // ★★★ 核心 UUID 配置 (根据你提供的数据) ★★★
-        const UUID_SEARCH = 0xFFF0; // 搜索用
-        const UUID_DATA_SERVICE = 0xFFE0; // 数据服务
-        const UUID_DATA_CHAR = 0xFFE1;    // 读写特征
+        // ★★★ 核心 UUID 配置 ★★★
+        const UUID_FFF0 = 0xFFF0; // 搜索用
+        const UUID_FFE0 = 0xFFE0; // 数据用
+        const UUID_FFE1 = 0xFFE1; // 数据用
 
         document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
                 if (!navigator.bluetooth) return alert("请使用 Chrome/Edge 或 Bluefy");
 
-                // 1. 搜索设备：只找 FFF0
-                // ★★★ 重点：必须在 optionalServices 里把 FFE0 也带上，否则连接后无权访问 ★★★
+                // 1. 双网捕捉：同时搜索 FFF0 和 FFE0
+                // 并申请 FFE0 的访问权限
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [UUID_SEARCH] }],
-                    optionalServices: [UUID_DATA_SERVICE] 
+                    filters: [
+                        { services: [UUID_FFF0] },
+                        { services: [UUID_FFE0] }
+                    ],
+                    optionalServices: [UUID_FFE0, UUID_FFF0] 
                 });
 
-                document.getElementById('status').innerText = "连接 GATT...";
+                document.getElementById('status').innerText = "连接中...";
                 const server = await device.gatt.connect();
                 
-                // 2. 连接后，直接去找 FFE0 服务 (不是 FFF0!)
-                document.getElementById('status').innerText = "获取服务 FFE0...";
-                const service = await server.getPrimaryService(UUID_DATA_SERVICE);
-                
-                // 3. 找 FFE1 特征值
-                document.getElementById('status').innerText = "获取特征 FFE1...";
-                const char = await service.getCharacteristic(UUID_DATA_CHAR);
+                // 2. 尝试获取数据服务 (FFE0 或 FFF0)
+                let service;
+                try { 
+                    service = await server.getPrimaryService(UUID_FFE0); 
+                    console.log("Got FFE0");
+                } catch { 
+                    try { 
+                        service = await server.getPrimaryService(UUID_FFF0); 
+                        console.log("Got FFF0");
+                    } catch(e){} 
+                }
+
+                if(!service) throw new Error("无法获取服务 (FFE0/FFF0)");
+
+                // 3. 尝试获取特征值
+                let char;
+                try {
+                    char = await service.getCharacteristic(UUID_FFE1); // 优先找 FFE1
+                } catch {
+                    // 如果 FFE1 找不到，遍历找第一个能 Notify 的
+                    const characteristics = await service.getCharacteristics();
+                    for (const c of characteristics) {
+                        if (c.properties.notify) { char = c; break; }
+                    }
+                }
+
+                if(!char) throw new Error("未找到数据特征值");
 
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', handleData);
@@ -204,7 +226,9 @@
 
             } catch (e) {
                 console.error(e);
-                alert("连接失败: " + e.message);
+                let msg = e.message;
+                if(msg.includes("GATT Server is disconnected")) msg = "设备被占用或信号弱";
+                alert("连接失败: " + msg + "\n\n请检查：\n1. 手机蓝牙关闭再开\n2. 确保没有其他APP连接该模块");
                 document.getElementById('status').innerText = "失败";
             }
         });
