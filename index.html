@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Find My Lock (FFF0专用版)</title>
+    <title>Find My Lock (Custom UUID)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { --primary: #007AFF; --success: #34C759; --danger: #FF3B30; --bg: rgba(255,255,255,0.95); }
+        :root { --primary: #007AFF; --success: #34C759; --bg: rgba(255,255,255,0.95); }
         body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #000; height: 100vh; overflow: hidden; }
         #map { height: 100%; width: 100%; }
         .panel { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
@@ -62,7 +62,7 @@
 
             <div id="log">Waiting...</div>
         </div>
-        <button id="btnConnect" class="btn">📡 连接 HC-08 (FFF0)</button>
+        <button id="btnConnect" class="btn">📡 连接 (Search: FFF0, Data: FFE1)</button>
     </div>
 
     <script>
@@ -160,38 +160,32 @@
             }
         }
 
-        // ★★★ 锁定 FFF0 服务 ★★★
-        const UUID_FFF0 = 0xFFF0; 
+        // ★★★ 核心 UUID 配置 (根据你提供的数据) ★★★
+        const UUID_SEARCH = 0xFFF0; // 搜索用
+        const UUID_DATA_SERVICE = 0xFFE0; // 数据服务
+        const UUID_DATA_CHAR = 0xFFE1;    // 读写特征
 
         document.getElementById('btnConnect').addEventListener('click', async () => {
             try {
                 if (!navigator.bluetooth) return alert("请使用 Chrome/Edge 或 Bluefy");
 
-                // 1. 搜索设备
+                // 1. 搜索设备：只找 FFF0
+                // ★★★ 重点：必须在 optionalServices 里把 FFE0 也带上，否则连接后无权访问 ★★★
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [UUID_FFF0] }] // 只找 FFF0，这最稳定
+                    filters: [{ services: [UUID_SEARCH] }],
+                    optionalServices: [UUID_DATA_SERVICE] 
                 });
 
-                document.getElementById('status').innerText = "连接中...";
+                document.getElementById('status').innerText = "连接 GATT...";
                 const server = await device.gatt.connect();
                 
-                // 2. 获取服务
-                const service = await server.getPrimaryService(UUID_FFF0);
+                // 2. 连接后，直接去找 FFE0 服务 (不是 FFF0!)
+                document.getElementById('status').innerText = "获取服务 FFE0...";
+                const service = await server.getPrimaryService(UUID_DATA_SERVICE);
                 
-                // 3. ★★★ 自动寻找数据出口 ★★★
-                // 遍历该服务下所有的特征值，找到那个支持 Notify 的！
-                const characteristics = await service.getCharacteristics();
-                let char = null;
-                
-                for (const c of characteristics) {
-                    if (c.properties.notify || c.properties.indicate) {
-                        char = c;
-                        console.log("找到数据通道:", c.uuid);
-                        break; 
-                    }
-                }
-
-                if (!char) throw new Error("该模块没有可读的数据通道(FFF1/FFF2等)");
+                // 3. 找 FFE1 特征值
+                document.getElementById('status').innerText = "获取特征 FFE1...";
+                const char = await service.getCharacteristic(UUID_DATA_CHAR);
 
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', handleData);
@@ -210,7 +204,7 @@
 
             } catch (e) {
                 console.error(e);
-                alert("连接失败: " + e.message + "\n\n请务必：\n1. 关闭后台的串口APP\n2. 重启手机蓝牙");
+                alert("连接失败: " + e.message);
                 document.getElementById('status').innerText = "失败";
             }
         });
