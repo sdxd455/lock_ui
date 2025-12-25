@@ -1,25 +1,35 @@
-#include "hal_usart.h"
 #include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
+#include "hal_usart.h"
+#include "stm32f10x.h"
 
-// ==========================================
-// 1. ???? (USART1) - ?? 115200
-// ==========================================
-// ??? ??:????,?? void ???
-void HalUSART1_Init(void)
+// -----------------------------------------------------------
+// 1. ???? (USART1) - 115200
+// -----------------------------------------------------------
+int fputc(int ch, FILE *f)
+{
+    USART_SendData(USART1, (uint8_t) ch);
+    while (USART_GetFlagStatus(USART1, USART_FLAG_TXE) == RESET);
+    return ch;
+}
+
+// ??? ????:???? u32 bound,?? void ???
+void HalUSART1_Init(void) 
 {
     GPIO_InitTypeDef GPIO_InitStructure;
     USART_InitTypeDef USART_InitStructure;
 
-    // ???? 115200
-    uint32_t bound = 115200;
+    // ?????? 115200 (?? 8M ?? + 72M ??)
+    // ??????????? u32 ?? uint32_t ?
+    uint32_t bound = 115200; 
 
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_USART1 | RCC_APB2Periph_GPIOA, ENABLE);
 
     // PA9 TX
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_9;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP; 
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 
     // PA10 RX
@@ -38,9 +48,9 @@ void HalUSART1_Init(void)
     USART_Cmd(USART1, ENABLE);
 }
 
-// ==========================================
-// 2. ???? (USART3) - 9600
-// ==========================================
+// -----------------------------------------------------------
+// 2. ???? (USART3) - 115200
+// -----------------------------------------------------------
 void HalUSART3_Init(void)
 {
     GPIO_InitTypeDef GPIO_InitStructure;
@@ -58,7 +68,8 @@ void HalUSART3_Init(void)
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
 
-    USART_InitStructure.USART_BaudRate = 9600; 
+    // ?????
+    USART_InitStructure.USART_BaudRate = 115200; 
     USART_InitStructure.USART_WordLength = USART_WordLength_8b;
     USART_InitStructure.USART_StopBits = USART_StopBits_1;
     USART_InitStructure.USART_Parity = USART_Parity_No;
@@ -69,24 +80,19 @@ void HalUSART3_Init(void)
     USART_Cmd(USART3, ENABLE);
 }
 
-// printf ???
-int fputc(int ch, FILE *f)
-{
-    while (USART_GetFlagStatus(USART1, USART_FLAG_TXE) == RESET);
-    USART_SendData(USART1, (uint8_t) ch);
-    return ch;
-}
-
-// ???
+// -----------------------------------------------------------
+// ?????
+// -----------------------------------------------------------
 volatile char USART1_DMA_RX_BYTE = 0; 
 extern volatile uint32_t g_system_time_ms;
+
 uint32_t GetCurrentTime(void) { return g_system_time_ms; }
 void _dbg_printf(const char* format, ...) { printf("%s\r\n", format); }
 
 uint16_t USART1_SendBuffer(const char* buffer, uint16_t length, int flag) {
     for (int i = 0; i < length; i++) {
-        while (USART_GetFlagStatus(USART1, USART_FLAG_TXE) == RESET);
         USART_SendData(USART1, (uint8_t) buffer[i]);
+        while (USART_GetFlagStatus(USART1, USART_FLAG_TXE) == RESET);
     }
     return length;
 }
